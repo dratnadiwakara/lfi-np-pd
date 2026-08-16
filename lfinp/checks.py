@@ -776,3 +776,183 @@ def check_panel_revisions(
             df,
         )
     return CheckResult("panel_revisions", True, "OK (history unchanged)")
+
+
+# -- 13: group composition changes -----------------------------------------------------
+
+
+def check_group_composition(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    since: Optional[date] = None,
+) -> CheckResult:
+    """A group PD is a cap-weighted index, so its level moves when a member
+    arrives or leaves - not only when risk changes. Synchrony joining `lender`
+    in 2014 shifts that group's sE and PD with no risk event behind it.
+
+    This is the one check a group panel genuinely needs: every other anomaly it
+    could show is already caught on the member banks it is built from. Flags
+    are keyed on the group's synthetic negative id, so `ack --rssd -4` works
+    the same way it does for a bank."""
+    if not _table_exists(conn, "group_panel"):
+        return CheckResult("group_composition", True, "no group panel yet")
+    from .groups import group_id
+
+    where = f"WHERE week_date >= DATE '{since.isoformat()}'" if since else ""
+    df = conn.execute(
+        f"""
+        WITH s AS (
+          SELECT grp, week_date, n_members,
+                 LAG(n_members) OVER (PARTITION BY grp ORDER BY week_date) AS prev
+          FROM group_panel {where}
+        )
+        SELECT grp, week_date AS ref_date, prev AS members_before,
+               n_members AS members_after
+        FROM s WHERE prev IS NOT NULL AND n_members <> prev
+        ORDER BY week_date DESC
+        """
+    ).fetchdf()
+    df = _normalize_dates(df, "ref_date")
+    if len(df):
+        df["rssd"] = [group_id(g) for g in df["grp"]]
+        df = suppress_acked(conn, "group_composition", df)
+    if len(df):
+        return CheckResult(
+            "group_composition", False,
+            f"{len(df)} membership change(s) in the group indices - a level "
+            f"shift at these dates is composition, not risk",
+            df,
+        )
+    return CheckResult("group_composition", True, "OK (stable membership)")
+
+
+# -- 14: equity issued, balance sheet not yet caught up --------------------------------
+
+
+def _issuance_days_sql(since: Optional[date]) -> str:
+    """Days where market cap moved without a matching return.
+
+    (mcap_t / mcap_t-1) / (1 + retx_t) is ~1.0 whenever the change in market
+    cap is the price change. It deviates only when the share count changed, and
+    it is immune to splits: market cap is split-invariant and retx is
+    split-adjusted, so a split leaves both terms at 1.0. That makes it a
+    share-issuance detector that does not need share counts, which matters
+    because the CRSP era has no equivalent of the Yahoo-side share_jumps gate.
+    """
+    lo = f"AND date >= DATE '{(since - timedelta(days=400)).isoformat()}'" if since else ""
+    return f"""
+      SELECT permco, date AS issue_date, ratio FROM (
+        SELECT permco, date,
+               (market_cap / NULLIF(LAG(market_cap) OVER w, 0))
+               / NULLIF(1 + retx, 0) AS ratio
+        FROM equity_daily
+        WHERE market_cap IS NOT NULL AND retx IS NOT NULL {lo}
+        WINDOW w AS (PARTITION BY permco ORDER BY date)
+      )
+      WHERE ratio IS NOT NULL
+        AND ABS(ratio - 1) > {config.ISSUANCE_RATIO_TOL}
+    """
+
+
+def check_issuance_bs_lag(
+    conn: duckdb.DuckDBPyConnection,
+    rssds: list[int],
+    *,
+    since: Optional[date] = None,
+) -> CheckResult:
+    """Equity base changed after the balance-sheet date the PD is using.
+
+    Y-9C is quarterly, so between a share issuance and the next filing the
+    kernel holds post-issuance equity against pre-issuance liabilities. E_scaled
+    is overstated, so the PD is *understated* - the reassuring direction, which
+    is why this needs a flag rather than a footnote.
+
+    Observed: Capital One closed Discover on 2025-05-18. Market cap 70.9bn ->
+    121.1bn while total_liab stayed at the Q1 430.1bn until Q2's 548.0bn landed
+    on 2025-07-04. np_PD read 0.164 for five weeks against 0.231 the week
+    before. Nothing else caught it: the Q1->Q2 balance-sheet jump was +27.4%,
+    under the 30% bs_jumps bar, and the PD ratio was 0.71, inside the
+    pd_plausibility band. Emergency capital raises produce the same distortion
+    and arrive exactly when the PD is being read.
+
+    The flag clears itself: a week stops being listed once its bs_quarter_end
+    moves past the issuance date. No correction is attempted - the true interim
+    liability figure does not exist in any source here.
+    """
+    if not rssds:
+        return CheckResult("issuance_bs_lag", True, "no banks in scope")
+    scope = ",".join(str(int(r)) for r in rssds)
+    wk = f"AND i.week_date >= DATE '{since.isoformat()}'" if since else ""
+    df = conn.execute(
+        f"""
+        WITH issues AS ({_issuance_days_sql(since)}),
+        bank AS (
+          SELECT i.rssd, i.week_date AS ref_date, 'bank' AS scope,
+                 MAX(s.issue_date) AS issue_date,
+                 MAX(s.ratio)      AS equity_ratio,
+                 ANY_VALUE(i.bs_quarter_end) AS bs_quarter_end,
+                 1.0 AS cap_share
+          FROM pd_input i
+          JOIN issues s ON s.permco = i.permco
+                       AND s.issue_date >  i.bs_quarter_end
+                       AND s.issue_date <= i.week_date
+          WHERE i.rssd IN ({scope}) AND i.E_scaled IS NOT NULL {wk}
+          GROUP BY i.rssd, i.week_date
+        )
+        SELECT * FROM bank ORDER BY ref_date DESC, rssd
+        """
+    ).fetchdf()
+    df = _normalize_dates(df, "ref_date", "issue_date", "bs_quarter_end")
+
+    gdf = pd.DataFrame()
+    if _table_exists(conn, "group_input"):
+        from .groups import group_id
+
+        gdf = conn.execute(
+            f"""
+            WITH issues AS ({_issuance_days_sql(since)}),
+            affected AS (
+              SELECT bg.grp, i.week_date, i.market_cap,
+                     MAX(s.issue_date) AS issue_date, MAX(s.ratio) AS equity_ratio
+              FROM pd_input i
+              JOIN bank_group bg ON bg.rssd = i.rssd
+              JOIN issues s ON s.permco = i.permco
+                           AND s.issue_date >  i.bs_quarter_end
+                           AND s.issue_date <= i.week_date
+              WHERE i.market_cap IS NOT NULL
+              GROUP BY bg.grp, i.week_date, i.market_cap
+            )
+            SELECT a.grp, a.week_date AS ref_date, 'group' AS scope,
+                   MAX(a.issue_date)   AS issue_date,
+                   MAX(a.equity_ratio) AS equity_ratio,
+                   ANY_VALUE(g.bs_quarter_end) AS bs_quarter_end,
+                   SUM(a.market_cap) / ANY_VALUE(g.market_cap) AS cap_share
+            FROM affected a
+            JOIN group_input g ON g.grp = a.grp AND g.week_date = a.week_date
+            WHERE g.E_scaled IS NOT NULL
+              {"AND a.week_date >= DATE '" + since.isoformat() + "'" if since else ""}
+            GROUP BY a.grp, a.week_date
+            HAVING SUM(a.market_cap) / ANY_VALUE(g.market_cap)
+                   > {config.ISSUANCE_GROUP_CAP_SHARE}
+            ORDER BY ref_date DESC, grp
+            """
+        ).fetchdf()
+        gdf = _normalize_dates(gdf, "ref_date", "issue_date", "bs_quarter_end")
+        if len(gdf):
+            gdf["rssd"] = [group_id(g) for g in gdf["grp"]]
+
+    both = pd.concat([d for d in (df, gdf) if len(d)], ignore_index=True) \
+        if (len(df) or len(gdf)) else pd.DataFrame()
+    both = suppress_acked(conn, "issuance_bs_lag", both)
+    if len(both):
+        worst = both["equity_ratio"].max()
+        n_bank = int((both["scope"] == "bank").sum())
+        n_grp = int((both["scope"] == "group").sum())
+        return CheckResult(
+            "issuance_bs_lag", False,
+            f"{n_bank} bank week(s) + {n_grp} group week(s) price post-issuance "
+            f"equity against a pre-issuance balance sheet (largest equity change "
+            f"{worst:.2f}x) - PD understated until the next filing",
+            both,
+        )
+    return CheckResult("issuance_bs_lag", True, "OK (balance sheets contemporaneous)")

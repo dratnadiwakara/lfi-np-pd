@@ -133,3 +133,164 @@ FITB 2025-11..2026-03 (contains the 1,087,022,011 overshoot),
 COF 2025-02..08 (contains the 383M->640M Discover issuance).
 If Yahoo later fixes its history, the "old method reproduces the defect"
 tests keep documenting what happened — refresh the note, don't delete.
+
+## 2026-08-16 — dated pd_panel snapshots
+
+Traceability question: in two years, can a PD be tied back to the data that
+produced it? Inputs, yes — `yf_daily`'s delete is scoped `date >= window_start`,
+so days freeze permanently once they leave the rolling window, and
+`pd_panel` -> `pd_input` -> 252 dailies reconstructs the number. Outputs, no:
+`pd_panel` holds only the current value and `pd_panel_prev` is wiped and
+rewritten every run, so a week revised by a vendor correction loses whatever it
+previously published. `pull_diff` explains why a number moved but not what it
+was.
+
+`db.export_panel_snapshot` now writes the whole panel to
+`data/snapshots/pd_panel_<rundate>.parquet` at the end of `init` and `update`,
+after the checks, with a `snapshot_date` column so the files union via
+`read_parquet('...*.parquet')`. Full panel per run, not a delta — deltas would
+need the whole chain intact to reconstruct any single week, which is exactly
+the fragility being fixed. Same-day re-run overwrites. Real store: 41,432 rows
+x 25 banks, 1986-10-03..2026-08-14, 3.0 MB ZSTD per run (~160 MB/yr).
+
+`data/` is gitignored and these files are not rebuildable by `init` — the only
+such artifact in the repo. The path lives under OneDrive, so they are synced;
+`status` now prints the snapshot count and latest date so a stalled archive is
+visible.
+
+Extended the same run with `pd_input_<rundate>.parquet`: all pd_input columns
+plus `retx_csv`, the VOL_WINDOW daily returns ending at date_eff. Makes a row
+self-verifying — `stddev_samp(fields) * sqrt(252)` must equal the stored sE.
+Checked against the live store: 45,825 rows, zero mismatches, max abs diff
+1.3e-15, n_obs_252 equal to the emitted non-null count everywhere.
+
+Two encoding choices are load-bearing. Returns go out as `CAST(retx AS
+VARCHAR)` (DuckDB's shortest round-tripping double text) rather than
+`printf('%.8f')`, because a re-derived sE that disagrees in the 9th decimal
+cannot be dismissed quickly. And a NULL retx is emitted as an empty field, not
+skipped: build_pd_input's window is 252 *rows* of equity_daily, so dropping a
+gap would silently pull an extra day in and the string would describe a
+different window than the one sE saw.
+
+Cost: 3.5 MB and ~23 s per run (window join over 226k daily rows), against a
+15-20 min Delaunay-bound compute. Storing the series per week rather than
+dumping equity_daily once (2.8 MB) duplicates ~250x, but ZSTD absorbs it and
+each row stays independently checkable, which is the point.
+
+## 2026-08-16 - business-model groups in banks.txt
+
+Added a mandatory `group=` flag per line: `moneycenter` (4), `dealer` (2),
+`feebased` (4), `lender` (15). Cut by funding source, which is what a PD is
+about. Started at three groups with GS/MS inside a combined `universal`; that
+was wrong - GS/MS take no meaningful deposits - and the 4th group was added
+the same day.
+
+Checked the merge against the panel before splitting (weekly d(sE), 2021-08+):
+GS-MS correlate 0.88, their top pair each; JPM/BAC/WFC/C follow at 0.68-0.77;
+no custodian appears in either top 8. So the original merge was the least-wrong
+of the two available, but the distinction it hid is the one that matters, and
+a 2-bank group is honest about being a pair rather than a peer median.
+
+Placed in banks.txt rather than a new file or a hardcoded dict because scope
+and its metadata drifting apart is the failure mode - one file to edit when a
+bank is added, and the parser aborts on a missing or unknown group instead of
+letting an unclassified bank drop out of every group-wise cut.
+
+`db.sync_bank_groups` mirrors it into `bank_group` on every init/update as a
+full DELETE+INSERT, so SQL can join without re-parsing and a bank removed from
+banks.txt cannot linger with a stale label. Table is derived, safe to drop.
+
+Judgement calls worth recording: SCHW is `feebased` - it holds securities not
+loans, and its 2023 episode was a duration/deposit event like the custodians',
+not a credit event. AXP/COF/SYF/ALLY sit with the regionals: different asset
+mix, same PD-driven-by-credit-losses logic. FCNCA is a regional that half
+became a tech lender after acquiring SVB - worth watching if it separates from
+its group.
+
+Not wired into peer_divergence yet. That gate still uses one pooled median
+across all 25 banks, which permanently biases card lenders high and custodians
+low. Grouping the median is the obvious next tightening; deliberately left
+alone here so this change adds no gate behaviour.
+
+## 2026-08-16 - group-level NP PD (each business-model group as one bank)
+
+group_daily / group_input / group_panel. The group is a merged entity, not an
+average of member PDs: liabilities summed, equity summed, sE = vol of the
+cap-weighted portfolio of members. Averaging PDs answers "how risky is a
+typical dealer"; merging answers "how risky is the dealer sector as one balance
+sheet". The gap is diversification, and it lands where theory says (group sE /
+cap-weighted member sE, 2015+): lender 0.86 (15 members), feebased 0.90,
+moneycenter 0.93, dealer 0.96 (2 members).
+
+Three decisions worth keeping:
+
+Lagged weights. w_i(t) = mcap_i(t-1). Same-day caps let a bank that rose 50%
+set its own weight - a look-ahead that biases the index up. Pinned by a test
+that would pass under either convention if it only checked the sign.
+
+Composition is implicit. A member leaves the index by running out of
+equity_daily rows (SVB, March 2023), not by a rule. Cheap and self-maintaining,
+but it means the index re-levels on membership as well as risk, so n_members is
+stored on every panel row and check_group_composition flags every change. That
+check exists because it is the one anomaly the member-level checks cannot see -
+everything else the group could show is already caught on the banks it sums.
+
+Partial balance sheets refused, not summed. If members holding >5% of group
+market cap lack a Y-9C row, total_liab is NULL and the week does not compute.
+A partial sum understates liabilities -> understates PD, i.e. fails in the
+reassuring direction. Consequence: moneycenter and feebased run from 1986,
+dealer and lender only from 2009-04-03 (GS/MS became BHCs in late 2008; lender
+still has scattered failing weeks to 2015). So the four series are not
+comparable before 2009. Correct, and visible in group_input rather than silent.
+
+Backfill: 4,725 group weeks, 948s wall (one Delaunay build). Levels check out -
+moneycenter peaks 0.85 on 2009-03-06 and 0.61 in Oct 2008, all four peak
+together in March 2020, and each group's latest PD sits just below the
+cap-weighted mean of its own members. check_group_composition returns 6 real
+membership changes (SVB exit 2023-03-24, Synchrony/Ally entering 2014-2016,
+Schwab into feebased 2007, and two older ones); left unacked deliberately - the
+verdict notes are the owner's to write.
+
+Group rows ride in the same run_compute call as the banks (synthetic negative
+permco, split on sign afterwards). The Delaunay build is a fixed per-call cost,
+so a separate group pass would have doubled the weekly runtime for 4.7k extra
+rows; folded in, it costs seconds.
+
+## 2026-08-16 - issuance_bs_lag: new equity over old liabilities
+
+Found by asking what the COF/Discover close did to the group index. The
+returns were clean - retx is a price return, so the share issuance could not
+fabricate one, and sE never moved (0.405 -> 0.406). That is invariant 1 doing
+its job.
+
+The damage was on the balance-sheet side. Close 2025-05-18: market cap
+70.9bn -> 121.1bn on 2025-05-30, total_liab stuck at Q1 430.1bn until Q2's
+548.0bn on 2025-07-04. Five weeks of E_scaled 0.28 against a true ~0.22, and
+np_PD 0.164 against 0.231 the week before. Same event, diluted, in the lender
+group: mcap 641 -> 703bn on flat liabilities, np_PD 0.185 -> 0.170.
+
+Nothing caught it. bs_jumps needs 30% and the Q1->Q2 move was +27.4%.
+pd_plausibility needs 3x and the PD moved 0.71x. peer_divergence and se_steps
+look at returns, which were correct. So it passed every gate while being wrong
+in the reassuring direction - the PD understated, the bank looking better
+capitalised than it was.
+
+Detector: (mcap_t / mcap_t-1) / (1 + retx_t). ~1.0 whenever the change in
+market cap is the price change; deviates only when the share count moved.
+Split-immune by construction - market cap is split-invariant and retx is
+split-adjusted, so both terms are 1.0 through a split. That matters because the
+CRSP era has no equivalent of the Yahoo-side share_jumps gate, so a share-count
+based detector would have to be written twice and would fire on every split.
+
+Flag is defined against bs_quarter_end, so it clears itself when the filing
+lands - no manual expiry, no stale suppression. Group rows carry the sector's
+negative id and a cap_share, gated at 2%: a 1% member issuing shares does not
+move a sector PD, and flagging it would train the operator to scroll past.
+
+No correction attempted. The true interim liability figure does not exist in
+Y-9C, Call Reports or anywhere else the pipeline reads. The check names the
+weeks and the size of the equity move; the judgement stays with the reader.
+
+Live store, 2024+: 4 events - COF/Discover (1.67x), FITB 2026-02-04 (1.64x),
+HBAN 2026-02-03 (1.29x), FCNCA 2026-01-02 (1.12x), KEY 2025-01-31 (1.12x).
+All plausible corporate actions; none acked yet.

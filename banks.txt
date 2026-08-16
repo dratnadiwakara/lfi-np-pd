@@ -1,29 +1,39 @@
-# lfi-np-pd bank scope — one RSSD per line.
-# Optional flag after the RSSD:  dead  = compute historical PDs only, never pull Yahoo.
+# lfi-np-pd bank scope - one RSSD per line.
+# Optional flags after the RSSD:
+#   dead        = compute historical PDs only, never pull Yahoo.
+#   group=<g>   = business-model group, required on every line. One of:
+#                   moneycenter  deposit-funded diversified GSIB: retail and
+#                                corporate lending plus a large dealer book
+#                   dealer       wholesale-funded broker-dealer; trading and
+#                                underwriting, deposits are recent and small
+#                   feebased     custody / trust / brokerage; revenue is fees on
+#                                assets serviced, credit risk is incidental
+#                   lender       balance-sheet credit risk is the business:
+#                                regionals, card and auto monolines
 # Edit this file to widen the scope, then run:  lfinp init --backfill-new
 # Names are informational (validated against crsp_link at runtime).
-1037003            # M & T BANK CORP
-1275216            # AMERICAN EXPRESS CO
-1132449            # CITIZENS FINANCIAL GROUP INC
-1069778            # PNC FINANCIAL SVCS GROUP INC
-1026632            # SCHWAB (CHARLES) CORP
-4504654            # SYNCHRONY FINANCIAL
-1039502            # JPMORGAN CHASE & CO
-2380443            # GOLDMAN SACHS GROUP INC
-3242838            # REGIONS FINANCIAL CORP
-3587146            # BANK OF NEW YORK MELLON CORP
-1068025            # KEYCORP
-2162966            # MORGAN STANLEY
-1199611            # NORTHERN TRUST CORP
-1951350            # CITIGROUP INC
-2277860            # CAPITAL ONE FINANCIAL CORP
-1119794            # US BANCORP
-1075612            # FIRST CITIZENS BANCSHARES -CL A
-1562859            # ALLY FINANCIAL INC
-1111435            # STATE STREET CORP
-1068191            # HUNTINGTON BANCSHARES
-1073757            # BANK OF AMERICA CORP
-1074156            # TRUIST FINANCIAL CORP
-1070345            # FIFTH THIRD BANCORP
-1120754            # WELLS FARGO & CO
-1031449  dead      # SVB FINANCIAL GROUP (failed 2023-03-10; historical compute only)
+1037003  group=lender       # M & T BANK CORP
+1275216  group=lender       # AMERICAN EXPRESS CO
+1132449  group=lender       # CITIZENS FINANCIAL GROUP INC
+1069778  group=lender       # PNC FINANCIAL SVCS GROUP INC
+1026632  group=feebased     # SCHWAB (CHARLES) CORP
+4504654  group=lender       # SYNCHRONY FINANCIAL
+1039502  group=moneycenter  # JPMORGAN CHASE & CO
+2380443  group=dealer       # GOLDMAN SACHS GROUP INC
+3242838  group=lender       # REGIONS FINANCIAL CORP
+3587146  group=feebased     # BANK OF NEW YORK MELLON CORP
+1068025  group=lender       # KEYCORP
+2162966  group=dealer       # MORGAN STANLEY
+1199611  group=feebased     # NORTHERN TRUST CORP
+1951350  group=moneycenter  # CITIGROUP INC
+2277860  group=lender       # CAPITAL ONE FINANCIAL CORP
+1119794  group=lender       # US BANCORP
+1075612  group=lender       # FIRST CITIZENS BANCSHARES -CL A
+1562859  group=lender       # ALLY FINANCIAL INC
+1111435  group=feebased     # STATE STREET CORP
+1068191  group=lender       # HUNTINGTON BANCSHARES
+1073757  group=moneycenter  # BANK OF AMERICA CORP
+1074156  group=lender       # TRUIST FINANCIAL CORP
+1070345  group=lender       # FIFTH THIRD BANCORP
+1120754  group=moneycenter  # WELLS FARGO & CO
+1031449  dead group=lender  # SVB FINANCIAL GROUP (failed 2023-03-10; historical compute only)

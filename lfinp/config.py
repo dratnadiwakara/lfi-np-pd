@@ -102,6 +102,17 @@ DECOUPLE_SE_STABLE = 0.10
 BS_JUMP_THRESHOLD = float(os.getenv("LFINP_BS_JUMP", "0.30"))
 # 12: historical pd_panel values changing between runs
 PANEL_REVISION_TOL = 1e-6
+# 14: equity base changed by issuance while the balance sheet is still the
+# pre-issuance quarter. Detected as market cap moving without a matching
+# return: (mcap_t / mcap_t-1) / (1 + retx_t), which is ~1.0 unless the share
+# count changed and is immune to splits (mcap is split-invariant, retx is
+# split-adjusted). 10% is well clear of the rounding noise in a share count
+# and well below any issuance large enough to matter (COF/Discover: 1.71).
+ISSUANCE_RATIO_TOL = float(os.getenv("LFINP_ISSUANCE_RATIO", "0.10"))
+# A group week is only flagged when the affected members are this much of its
+# market cap; below that the distortion is smaller than the rounding on the
+# number being read.
+ISSUANCE_GROUP_CAP_SHARE = float(os.getenv("LFINP_ISSUANCE_GROUP_SHARE", "0.02"))
 
 # Shares-anchor tolerance: after the CRSP edge, Yahoo's share count is
 # trusted only once it is within this fraction of the CRSP shrout anchor.
@@ -144,6 +155,16 @@ def data_db_path() -> Path:
     return DATA_DIR / "lfi_pd.duckdb"
 
 
+def snapshot_dir() -> Path:
+    """Dated pd_panel snapshots. The ONLY non-rebuildable artifact in data/:
+    once the rolling window moves past a week, a revision to that week's PD
+    can be explained (pull_diff) but the previously-published value cannot be
+    recovered from the store. These files are that record."""
+    p = DATA_DIR / "snapshots"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def value_surface_path() -> Path:
     return INPUTS_DIR / "ValueSurface.mat"
 
@@ -163,18 +184,31 @@ def call_reports_db_path() -> Path:
 # -- Bank list -----------------------------------------------------------------------
 
 
+# Business-model groups. A pooled cross-bank median mixes a card monoline with
+# a custodian, so peer comparisons and reporting cuts need this split. The cut
+# is by funding source, because that is what a PD is about: deposits (moneycenter,
+# lender), wholesale markets (dealer), or fees on assets never on the balance
+# sheet (feebased). 'dealer' has only two members - GS and MS are wholesale-funded
+# in a way nothing else here is, and merging them into moneycenter would hide
+# exactly the distinction the group exists to make. Use it as a pair, not a median.
+BANK_GROUPS = ("moneycenter", "dealer", "feebased", "lender")
+
+
 @dataclass(frozen=True)
 class Bank:
     rssd: int
     dead: bool          # True = compute historical PDs only, never pull Yahoo
     comment: str
+    group: Optional[str] = None      # one of BANK_GROUPS; None only via env override
 
 
 def load_banks(path: Optional[Path] = None) -> list[Bank]:
-    """Parse banks.txt: one RSSD per line, optional 'dead' flag, '#' comments.
+    """Parse banks.txt: one RSSD per line, flags 'dead' / 'group=<g>', '#' comments.
 
-    Env LFINP_RSSDS (comma-separated) overrides the file entirely (all
-    treated as live)."""
+    group is mandatory in the file — an unclassified bank would silently fall
+    out of every group-wise cut. Env LFINP_RSSDS (comma-separated) overrides the
+    file entirely (all live, no group).
+    """
     env = os.getenv("LFINP_RSSDS")
     if env:
         return [Bank(rssd=int(x), dead=False, comment="(env)")
@@ -191,13 +225,25 @@ def load_banks(path: Optional[Path] = None) -> list[Bank]:
             continue
         rssd = int(tokens[0])
         flags = {t.lower() for t in tokens[1:]}
+        group = None
+        for f in list(flags):
+            if f.startswith("group="):
+                group = f.split("=", 1)[1]
+                flags.discard(f)
         unknown = flags - {"dead"}
         if unknown:
             raise ValueError(f"Unknown flag(s) {unknown} on line: {raw!r}")
+        if group is None:
+            raise ValueError(f"Missing group= on line: {raw!r}")
+        if group not in BANK_GROUPS:
+            raise ValueError(
+                f"Unknown group {group!r} on line: {raw!r} - expected one of "
+                f"{', '.join(BANK_GROUPS)}")
         if rssd in seen:
             raise ValueError(f"Duplicate RSSD {rssd} in {p}")
         seen.add(rssd)
-        banks.append(Bank(rssd=rssd, dead="dead" in flags, comment=comment.strip()))
+        banks.append(Bank(rssd=rssd, dead="dead" in flags,
+                          comment=comment.strip(), group=group))
     if not banks:
         raise ValueError(f"No banks parsed from {p}")
     return banks
@@ -211,6 +257,11 @@ def active_rssds() -> list[int]:
 def yahoo_rssds() -> list[int]:
     """RSSDs that get Yahoo pulls (live banks only)."""
     return [b.rssd for b in load_banks() if not b.dead]
+
+
+def bank_groups() -> dict[int, Optional[str]]:
+    """rssd -> business-model group."""
+    return {b.rssd: b.group for b in load_banks()}
 
 
 # -- Secrets ---------------------------------------------------------------------------

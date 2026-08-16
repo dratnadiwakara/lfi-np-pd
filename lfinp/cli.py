@@ -21,7 +21,7 @@ import pandas as pd
 
 from . import checks as checks_mod
 from . import compute as compute_mod
-from . import config, db as db_mod, panel, sources, yf
+from . import config, db as db_mod, groups, panel, sources, yf
 from .db import ack_flag, get_connection, init_schema
 
 
@@ -114,6 +114,8 @@ def _post_checks(conn, rssds: list[int], *, since: Optional[date],
         checks_mod.check_pd_decoupling(conn, rssds, since=since),
         checks_mod.check_bs_jumps(conn, rssds, since=since),
         checks_mod.check_fallback_rate(conn, rssds),
+        checks_mod.check_group_composition(conn, since=since),
+        checks_mod.check_issuance_bs_lag(conn, rssds, since=since),
     ]
     any_flag = False
     for r in results:
@@ -133,6 +135,25 @@ def _post_checks(conn, rssds: list[int], *, since: Optional[date],
     return not (any_flag and strict)
 
 
+def _snapshot_panel_file(conn) -> None:
+    """Archive the published panel and the inputs behind it. Runs after the
+    checks, so a file always corresponds to a panel whose gates were
+    evaluated. The pair is self-contained: outputs, inputs, and the return
+    series each sE came from, so an old number can be re-derived without the
+    live store."""
+    p_panel = db_mod.export_panel_snapshot(conn)
+    if p_panel is None:
+        _log("snapshot: pd_panel empty, nothing archived")
+        return
+    p_input = db_mod.export_input_snapshot(conn)
+    p_group = db_mod.export_group_snapshot(conn)
+    n = len(list(config.snapshot_dir().glob("pd_panel_*.parquet")))
+    _log(f"snapshot: wrote {p_panel.name}"
+         + (f" + {p_input.name}" if p_input else "")
+         + (f" + {p_group.name}" if p_group else "")
+         + f" ({n} archived run(s) in {config.snapshot_dir()})")
+
+
 def _rebuild_and_compute(
     conn,
     all_permcos: list[int],
@@ -146,26 +167,36 @@ def _rebuild_and_compute(
     _log(f"fred_weekly: {n_fw} row(s)")
     n_pi = panel.build_pd_input(conn, all_permcos)
     _log(f"pd_input: {n_pi} row(s)")
+    # Group indices are built from pd_input, so they are ready before compute
+    # and ride along in the same kernel call. The Delaunay build is a fixed
+    # cost per call - running groups separately would pay it twice.
+    _log(f"group_daily: {groups.build_group_daily(conn)} row(s)")
+    _log(f"group_input: {groups.build_group_input(conn)} row(s)")
 
-    if recompute_since is not None:
-        df = compute_mod.assemble_inputs(
-            conn, permco_filter=all_permcos,
-            week_date_min=recompute_since.isoformat(),
-            exclude_existing=False,
-        )
-    else:
-        df = compute_mod.assemble_inputs(
-            conn, permco_filter=all_permcos, exclude_existing=True,
-        )
-    if df.empty:
+    since = recompute_since.isoformat() if recompute_since else None
+    incremental = recompute_since is None
+    df = compute_mod.assemble_inputs(
+        conn, permco_filter=all_permcos,
+        week_date_min=since, exclude_existing=incremental,
+    )
+    df_g = groups.assemble_group_inputs(
+        conn, week_date_min=since, exclude_existing=incremental,
+    )
+    if df.empty and df_g.empty:
         _log("compute: nothing to do")
         return 0
     n_snap = db_mod.snapshot_panel(conn)
     _log(f"snapshot: froze {n_snap} pd_panel row(s) for revision diffing")
-    _log(f"compute: {len(df)} row(s) (Delaunay build dominates; ~15-20 min)")
-    result = compute_mod.run_compute(df)
-    n = compute_mod.upsert_pd_panel(conn, result)
+    _log(f"compute: {len(df)} bank row(s) + {len(df_g)} group row(s) "
+         f"(Delaunay build dominates; ~15-20 min)")
+    both = pd.concat([df, df_g], ignore_index=True) if not df_g.empty else df
+    result = compute_mod.run_compute(both)
+    # groups carry synthetic negative permcos; that is the whole split rule
+    is_grp = result["permco"] < 0
+    n = compute_mod.upsert_pd_panel(conn, result[~is_grp])
     _log(f"pd_panel: upserted {n} row(s)")
+    ng = groups.upsert_group_panel(conn, result[is_grp])
+    _log(f"group_panel: upserted {ng} row(s)")
     return n
 
 
@@ -190,6 +221,7 @@ def cmd_init(args) -> int:
         mapping, all_permcos, live_permcos = _scope(conn)
         for rssd, permco in sorted(mapping.items()):
             _log(f"  rssd {rssd} -> permco {permco}")
+        _log(f"bank_group: {db_mod.sync_bank_groups(conn, mapping)} bank(s)")
 
         secrets = config.load_secrets()
         wdb = sources.connect_wrds(secrets.wrds_username, secrets.wrds_password)
@@ -244,6 +276,7 @@ def cmd_init(args) -> int:
         # window touching them -> recompute from the earliest new CRSP day.
         _rebuild_and_compute(conn, all_permcos, recompute_since=crsp_min)
         _post_checks(conn, config.active_rssds(), since=None)
+        _snapshot_panel_file(conn)
         _log("init complete")
         return 0
     finally:
@@ -255,6 +288,7 @@ def cmd_update(args) -> int:
     try:
         init_schema(conn)
         mapping, all_permcos, live_permcos = _scope(conn)
+        _log(f"bank_group: {db_mod.sync_bank_groups(conn, mapping)} bank(s)")
         secrets = config.load_secrets()
 
         n = sources.fetch_dgs10_incremental(conn, secrets.fred_api_key)
@@ -291,6 +325,7 @@ def cmd_update(args) -> int:
         # history that init already triaged.
         _post_checks(conn, config.active_rssds(),
                      since=date.today() - timedelta(days=430))
+        _snapshot_panel_file(conn)
         _log("update complete")
         return 0
     finally:
@@ -308,9 +343,16 @@ def cmd_status(args) -> int:
             ("fred_dgs10", "SELECT MAX(date), COUNT(*) FROM fred_dgs10"),
             ("pd_input", "SELECT MAX(week_date), COUNT(*) FROM pd_input"),
             ("pd_panel", "SELECT MAX(week_date), COUNT(*) FROM pd_panel"),
+            ("group_panel", "SELECT MAX(week_date), COUNT(*) FROM group_panel"),
         ]:
             mx, n = conn.execute(sql).fetchone()
             print(f"  {label:<12} latest {mx}   rows {n:,}")
+        snaps = sorted(config.snapshot_dir().glob("pd_panel_*.parquet"))
+        if snaps:
+            print(f"  {'snapshots':<12} latest "
+                  f"{snaps[-1].stem.removeprefix('pd_panel_')}   files {len(snaps)}")
+        else:
+            print(f"  {'snapshots':<12} none yet")
         print("\nPer-bank pd_panel tail:")
         df = conn.execute(
             """
@@ -323,7 +365,28 @@ def cmd_status(args) -> int:
             FROM pd_panel p GROUP BY p.rssd ORDER BY name
             """
         ).fetchdf()
+        # from banks.txt, not the bank_group table: status runs read-only and
+        # must still work against a store written before the table existed.
+        grp = config.bank_groups()
+        df.insert(1, "group", df["rssd"].map(grp).fillna("?"))
+        df = df.sort_values(["group", "name"], kind="stable")
         print(df.to_string(index=False))
+        n_grp = conn.execute("SELECT COUNT(*) FROM group_panel").fetchone()[0]
+        if n_grp:
+            print("\nGroup panel (each group as one merged bank):")
+            gdf = conn.execute(
+                """
+                SELECT grp, MAX(week_date) AS last_week,
+                       MAX(n_members) FILTER (WHERE week_date =
+                           (SELECT MAX(week_date) FROM group_panel)) AS members,
+                       MAX(sE)    FILTER (WHERE week_date =
+                           (SELECT MAX(week_date) FROM group_panel)) AS sE,
+                       MAX(np_PD) FILTER (WHERE week_date =
+                           (SELECT MAX(week_date) FROM group_panel)) AS np_pd_latest
+                FROM group_panel GROUP BY grp ORDER BY grp
+                """
+            ).fetchdf()
+            print(gdf.to_string(index=False))
         print("\nLast check results:")
         df = conn.execute(
             """
@@ -368,6 +431,8 @@ def cmd_checks(args) -> int:
             checks_mod.check_pd_decoupling(conn, rssds, since=since),
             checks_mod.check_bs_jumps(conn, rssds, since=since),
             checks_mod.check_fallback_rate(conn, rssds),
+            checks_mod.check_group_composition(conn, since=since),
+            checks_mod.check_issuance_bs_lag(conn, rssds, since=since),
         ]:
             mark = "OK  " if r.passed else "FLAG"
             print(f"[{mark}] {r.name}: {r.summary}")
@@ -390,6 +455,8 @@ def _run_named_check(conn, name: str, rssds: list[int], permcos: list[int]):
         "bs_jumps": lambda: checks_mod.check_bs_jumps(conn, rssds),
         "fallback_rate": lambda: checks_mod.check_fallback_rate(conn, rssds),
         "panel_revisions": lambda: checks_mod.check_panel_revisions(conn),
+        "group_composition": lambda: checks_mod.check_group_composition(conn),
+        "issuance_bs_lag": lambda: checks_mod.check_issuance_bs_lag(conn, rssds),
     }
     if name not in fns:
         raise SystemExit(f"unknown check {name!r}; choose from {sorted(fns)}")

@@ -86,6 +86,72 @@ CREATE TABLE IF NOT EXISTS link (
   PRIMARY KEY (permco, rssd, quarter_end)
 );
 
+-- Business-model group per bank, mirrored from banks.txt on every run so SQL
+-- can cut the panel without re-parsing the file. banks.txt stays the source of
+-- truth; this table is derived and safe to drop.
+CREATE TABLE IF NOT EXISTS bank_group (
+  rssd    INTEGER NOT NULL PRIMARY KEY,
+  grp     TEXT,
+  permco  INTEGER,             -- resolved at sync time; NULL if link lookup failed
+  dead    BOOLEAN,
+  name    TEXT,
+  synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Cap-weighted daily index per group: the equity of the group treated as one
+-- merged bank. ret is NULL on the first day (no lagged weight), same as retx.
+CREATE TABLE IF NOT EXISTS group_daily (
+  grp        TEXT NOT NULL,
+  date       DATE NOT NULL,
+  ret        DOUBLE,
+  market_cap DOUBLE,
+  n_members  INTEGER,          -- members with a market cap that day
+  n_ret_members INTEGER,       -- members contributing to the return that day
+  PRIMARY KEY (grp, date)
+);
+
+CREATE TABLE IF NOT EXISTS group_input (
+  grp        TEXT NOT NULL,
+  week_date  DATE NOT NULL,
+  date_eff   DATE,
+  market_cap DOUBLE,
+  sE         DOUBLE,
+  n_obs_252  INTEGER,
+  r          DOUBLE,
+  bs_quarter_end DATE,
+  total_liab DOUBLE,           -- NULL unless balance-sheet cap coverage clears the bar
+  assets     DOUBLE,
+  equity     DOUBLE,
+  E_scaled   DOUBLE,
+  n_members    INTEGER,
+  n_members_bs INTEGER,
+  bs_cap_coverage DOUBLE,
+  n_ret_members INTEGER,
+  built_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (grp, week_date)
+);
+
+CREATE TABLE IF NOT EXISTS group_panel (
+  week_date DATE NOT NULL,
+  grp       TEXT NOT NULL,
+  n_members INTEGER,           -- carried through: a level shift may be composition
+  total_liab DOUBLE,
+  market_cap_raw DOUBLE,
+  E_scaled DOUBLE,
+  sE DOUBLE,
+  r  DOUBLE,
+  L DOUBLE, B DOUBLE, mdef DOUBLE, fs DOUBLE, bookF DOUBLE,
+  merton_PD DOUBLE,
+  np_PD DOUBLE,
+  L_fallback_used TINYINT,
+  fs_fallback_used TINYINT,
+  B_fallback_used TINYINT,
+  bookF_fallback_used TINYINT,
+  mdef_fallback_used TINYINT,
+  computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (week_date, grp)
+);
+
 CREATE TABLE IF NOT EXISTS ticker_hist (
   permco    INTEGER NOT NULL,
   permno    INTEGER NOT NULL,
@@ -242,6 +308,31 @@ def detach(conn: duckdb.DuckDBPyConnection, alias: str) -> None:
 
 def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute(SCHEMA_DDL)
+    # CREATE TABLE IF NOT EXISTS will not widen a table that predates a column.
+    # bank_group is derived, but dropping it here would empty it for read-only
+    # commands until the next update, so add the column in place instead.
+    conn.execute("ALTER TABLE bank_group ADD COLUMN IF NOT EXISTS permco INTEGER")
+
+
+def sync_bank_groups(
+    conn: duckdb.DuckDBPyConnection,
+    permco_map: Optional[dict] = None,
+) -> int:
+    """Mirror banks.txt groups into bank_group. Full replace, not a merge: a
+    bank dropped from banks.txt must disappear from the mapping too, otherwise
+    a stale group silently keeps showing up in group-wise cuts.
+
+    permco_map (rssd -> permco) is what lets the group index join equity_daily
+    directly. Without it the column is NULL and the group build finds nothing,
+    which is loud rather than wrong."""
+    banks = config.load_banks()
+    pm = permco_map or {}
+    conn.execute("DELETE FROM bank_group")
+    conn.executemany(
+        "INSERT INTO bank_group (rssd, grp, permco, dead, name) VALUES (?, ?, ?, ?, ?)",
+        [(b.rssd, b.group, pm.get(b.rssd), b.dead, b.comment) for b in banks],
+    )
+    return len(banks)
 
 
 def max_value(
@@ -283,6 +374,157 @@ def snapshot_panel(conn: duckdb.DuckDBPyConnection) -> int:
         """
     )
     return int(conn.execute("SELECT COUNT(*) FROM pd_panel_prev").fetchone()[0])
+
+
+def export_panel_snapshot(
+    conn: duckdb.DuckDBPyConnection,
+    run_date=None,
+    *,
+    out_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Write the whole pd_panel to data/snapshots/pd_panel_YYYY-MM-DD.parquet.
+
+    pd_panel_prev is one run deep, so it answers "did the last run change this
+    number?" and nothing more. Values inside the rolling window legitimately
+    move between runs (vendor revisions are absorbed by design), which means a
+    number cited in a report months ago is not otherwise retrievable: the
+    inputs are reconstructible from yf_daily + pull_diff, the published output
+    is not. These files close that gap.
+
+    Same-day re-runs overwrite; each run is a complete panel, not a delta, so
+    the set of files can be read as one table:
+
+        SELECT * FROM read_parquet('data/snapshots/pd_panel_*.parquet')
+
+    Returns the path written, or None when pd_panel is empty.
+    """
+    from datetime import date as _date
+
+    d = run_date or _date.today()
+    n = int(conn.execute("SELECT COUNT(*) FROM pd_panel").fetchone()[0])
+    if not n:
+        return None
+    target = Path(out_dir) if out_dir else config.snapshot_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / f"pd_panel_{d.isoformat()}.parquet"
+    # snapshot_date is carried in the rows as well as the filename so a
+    # multi-file read stays self-describing.
+    conn.execute(
+        "COPY (SELECT DATE '"
+        + d.isoformat()
+        + "' AS snapshot_date, * FROM pd_panel ORDER BY week_date, permco) "
+        f"TO '{path.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+    )
+    return path
+
+
+def export_group_snapshot(
+    conn: duckdb.DuckDBPyConnection,
+    run_date=None,
+    *,
+    out_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Archive group_panel joined to its inputs, same contract as the bank
+    panel: complete table per run, snapshot_date in the rows, same-day re-runs
+    overwrite.
+
+    Group PDs get cited like bank PDs and revise for the same reason, so they
+    need the same record. The input columns ride along in one file rather than
+    a second: a group row is small, and n_members / bs_cap_coverage are the two
+    things a reader needs to interpret the number at all."""
+    from datetime import date as _date
+
+    d = run_date or _date.today()
+    if not int(conn.execute("SELECT COUNT(*) FROM group_panel").fetchone()[0]):
+        return None
+    target = Path(out_dir) if out_dir else config.snapshot_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / f"group_panel_{d.isoformat()}.parquet"
+    conn.execute(
+        f"""COPY (
+              SELECT DATE '{d.isoformat()}' AS snapshot_date, p.*,
+                     i.date_eff, i.n_obs_252, i.n_members_bs,
+                     i.bs_cap_coverage, i.n_ret_members
+              FROM group_panel p
+              LEFT JOIN group_input i USING (grp, week_date)
+              ORDER BY p.week_date, p.grp
+            ) TO '{path.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)""")
+    return path
+
+
+def export_input_snapshot(
+    conn: duckdb.DuckDBPyConnection,
+    run_date=None,
+    *,
+    out_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Write pd_input plus the actual return series behind each sE to
+    data/snapshots/pd_input_YYYY-MM-DD.parquet.
+
+    The panel snapshot preserves the published PD; this preserves what it was
+    computed from, in a form that needs nothing else to check. Each row is one
+    (permco, week) with its balance-sheet and rate inputs, plus `retx_csv`:
+    the VOL_WINDOW daily returns ending at date_eff, in date order, comma
+    separated, exactly as panel.build_pd_input's window sees them.
+
+    Two details make the string reproduce sE rather than merely resemble it:
+
+    - The window is VOL_WINDOW *rows* of equity_daily, not 252 non-null
+      returns, so a missing retx is emitted as an empty field and holds its
+      slot. STDDEV_SAMP ignores it; dropping it would silently shift the
+      window a day earlier.
+    - Values are cast to VARCHAR, not printf-formatted. DuckDB's double
+      rendering round-trips; %.8f does not, and a re-derived sE that differs
+      in the 9th decimal is a false positive nobody can dismiss quickly.
+
+    Recompute check: stddev_samp(the non-empty fields) * sqrt(252) == sE.
+    """
+    from datetime import date as _date
+
+    d = run_date or _date.today()
+    n = int(conn.execute("SELECT COUNT(*) FROM pd_input").fetchone()[0])
+    if not n:
+        return None
+    target = Path(out_dir) if out_dir else config.snapshot_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / f"pd_input_{d.isoformat()}.parquet"
+    conn.execute(
+        f"""
+        COPY (
+          WITH d AS (
+            SELECT permco, date, retx,
+                   ROW_NUMBER() OVER (PARTITION BY permco ORDER BY date) AS rn
+            FROM equity_daily
+            WHERE permco IN (SELECT DISTINCT permco FROM pd_input)
+          ),
+          anchored AS (
+            SELECT i.permco, i.week_date, d.rn AS rn_eff
+            FROM pd_input i
+            JOIN d ON d.permco = i.permco AND d.date = i.date_eff
+          ),
+          series AS (
+            SELECT a.permco, a.week_date,
+                   string_agg(COALESCE(CAST(w.retx AS VARCHAR), ''), ','
+                              ORDER BY w.date) AS retx_csv,
+                   COUNT(w.retx)               AS retx_n_obs,
+                   COUNT(*)                    AS retx_n_rows,
+                   MIN(w.date)                 AS retx_from,
+                   MAX(w.date)                 AS retx_to
+            FROM anchored a
+            JOIN d w
+              ON w.permco = a.permco
+             AND w.rn BETWEEN a.rn_eff - {config.VOL_WINDOW - 1} AND a.rn_eff
+            GROUP BY a.permco, a.week_date
+          )
+          SELECT DATE '{d.isoformat()}' AS snapshot_date, i.*,
+                 s.retx_from, s.retx_to, s.retx_n_rows, s.retx_n_obs, s.retx_csv
+          FROM pd_input i
+          LEFT JOIN series s USING (permco, week_date)
+          ORDER BY i.week_date, i.permco
+        ) TO '{path.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)
+        """
+    )
+    return path
 
 
 def ack_flag(
