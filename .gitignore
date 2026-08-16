@@ -1,0 +1,19 @@
+# Local store (rebuildable: lfinp init)
+data/
+*.duckdb
+*.duckdb.wal
+
+# Large binary input - 30MB NP value surface, not source.
+# Obtain by copying from the bank-pd repo (see README "Setup").
+inputs/ValueSurface.mat
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Scratch
+*.log
+*.png
+!notebooks/*.png

@@ -1,0 +1,29 @@
+# lfi-np-pd bank scope — one RSSD per line.
+# Optional flag after the RSSD:  dead  = compute historical PDs only, never pull Yahoo.
+# Edit this file to widen the scope, then run:  lfinp init --backfill-new
+# Names are informational (validated against crsp_link at runtime).
+1037003            # M & T BANK CORP
+1275216            # AMERICAN EXPRESS CO
+1132449            # CITIZENS FINANCIAL GROUP INC
+1069778            # PNC FINANCIAL SVCS GROUP INC
+1026632            # SCHWAB (CHARLES) CORP
+4504654            # SYNCHRONY FINANCIAL
+1039502            # JPMORGAN CHASE & CO
+2380443            # GOLDMAN SACHS GROUP INC
+3242838            # REGIONS FINANCIAL CORP
+3587146            # BANK OF NEW YORK MELLON CORP
+1068025            # KEYCORP
+2162966            # MORGAN STANLEY
+1199611            # NORTHERN TRUST CORP
+1951350            # CITIGROUP INC
+2277860            # CAPITAL ONE FINANCIAL CORP
+1119794            # US BANCORP
+1075612            # FIRST CITIZENS BANCSHARES -CL A
+1562859            # ALLY FINANCIAL INC
+1111435            # STATE STREET CORP
+1068191            # HUNTINGTON BANCSHARES
+1073757            # BANK OF AMERICA CORP
+1074156            # TRUIST FINANCIAL CORP
+1070345            # FIFTH THIRD BANCORP
+1120754            # WELLS FARGO & CO
+1031449  dead      # SVB FINANCIAL GROUP (failed 2023-03-10; historical compute only)

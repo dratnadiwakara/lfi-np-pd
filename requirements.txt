@@ -1,0 +1,9 @@
+duckdb
+pandas
+numpy
+scipy
+pyyaml
+requests
+yfinance
+pytest
+# wrds: install with --no-deps (pins pandas<2.3; works with pandas 3.x)
