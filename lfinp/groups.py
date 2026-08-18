@@ -186,14 +186,23 @@ def assemble_group_inputs(
     week_date_min: Optional[str] = None,
     exclude_existing: bool = True,
 ) -> pd.DataFrame:
-    """Compute-ready group rows, same strict kernel filter as the members."""
+    """Compute-ready group rows, same strict kernel filter as the members.
+
+    exclude_existing carries the same staleness rule as assemble_inputs: a
+    group week whose inputs changed must recompute. Groups sum pd_input, so
+    anything that rewrites a member's history — a merger bridge, a vendor
+    revision — moves the group with it."""
     wheres = ["sE IS NOT NULL", "market_cap IS NOT NULL", "market_cap > 0",
               "total_liab IS NOT NULL", "total_liab > 0", "r IS NOT NULL"]
     params: list = []
     if week_date_min:
         wheres.append("week_date >= ?")
         params.append(week_date_min)
-    excl = ("AND (week_date, grp) NOT IN (SELECT week_date, grp FROM group_panel)"
+    excl = (f"""AND NOT EXISTS (
+                  SELECT 1 FROM group_panel p
+                  WHERE p.week_date = g.week_date AND p.grp = g.grp
+                    AND {compute_mod._inputs_match_sql('p', 'g')}
+                )"""
             if exclude_existing else "")
     df = conn.execute(f"""
         SELECT grp, week_date, date_eff,
@@ -201,7 +210,7 @@ def assemble_group_inputs(
                EXTRACT(month FROM week_date)::INTEGER AS month,
                r, sE, market_cap AS market_cap_raw, total_liab,
                E_scaled AS E, n_members
-        FROM group_input
+        FROM group_input g
         WHERE {' AND '.join(wheres)} {excl}
         ORDER BY grp, week_date
     """, params).fetchdf()

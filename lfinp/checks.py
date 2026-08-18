@@ -702,9 +702,17 @@ def check_bs_jumps(
     df = conn.execute(
         f"""
         WITH q AS (
-          SELECT DISTINCT rssd, bs_quarter_end, total_liab, bs_source
+          -- total_liab_reported, not total_liab: the merger bridge raises
+          -- total_liab mid-quarter on purpose, and comparing a bridged week
+          -- against an unbridged one would print a step that was never filed.
+          SELECT DISTINCT rssd, bs_quarter_end,
+                 COALESCE(total_liab_reported, total_liab) AS total_liab,
+                 -- strip the bridge marker too, else one quarter yields two
+                 -- DISTINCT rows and the LAG sequence gains a phantom step
+                 replace(bs_source, '+proforma', '') AS bs_source
           FROM pd_input
-          WHERE rssd IN ({placeholders}) AND total_liab > 0
+          WHERE rssd IN ({placeholders})
+            AND COALESCE(total_liab_reported, total_liab) > 0
             AND bs_quarter_end IS NOT NULL {since_clause}
         ),
         seq AS (
@@ -876,8 +884,13 @@ def check_issuance_bs_lag(
     and arrive exactly when the PD is being read.
 
     The flag clears itself: a week stops being listed once its bs_quarter_end
-    moves past the issuance date. No correction is attempted - the true interim
-    liability figure does not exist in any source here.
+    moves past the issuance date.
+
+    Weeks already corrected by the pro-forma merger bridge (bs_bridged, driven
+    by mergers.txt) are excluded - their denominator already contains the
+    target. What is left is the to-do list: every flagged week is either a
+    merger missing from mergers.txt or a capital raise, which has no target to
+    bridge and so stays a flag rather than a correction.
     """
     if not rssds:
         return CheckResult("issuance_bs_lag", True, "no banks in scope")
@@ -896,7 +909,9 @@ def check_issuance_bs_lag(
           JOIN issues s ON s.permco = i.permco
                        AND s.issue_date >  i.bs_quarter_end
                        AND s.issue_date <= i.week_date
-          WHERE i.rssd IN ({scope}) AND i.E_scaled IS NOT NULL {wk}
+          WHERE i.rssd IN ({scope}) AND i.E_scaled IS NOT NULL
+            AND NOT COALESCE(i.bs_bridged, FALSE)
+            {wk}
           GROUP BY i.rssd, i.week_date
         )
         SELECT * FROM bank ORDER BY ref_date DESC, rssd
@@ -920,6 +935,7 @@ def check_issuance_bs_lag(
                            AND s.issue_date >  i.bs_quarter_end
                            AND s.issue_date <= i.week_date
               WHERE i.market_cap IS NOT NULL
+                AND NOT COALESCE(i.bs_bridged, FALSE)
               GROUP BY bg.grp, i.week_date, i.market_cap
             )
             SELECT a.grp, a.week_date AS ref_date, 'group' AS scope,

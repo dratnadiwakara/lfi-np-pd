@@ -35,6 +35,124 @@ def _friday_calendar_sql(start_date: str, end_date: str) -> str:
     """
 
 
+# How far around the stated closing date to look for the day the share count
+# actually re-bases. The legal close and the vendor's share-count update are
+# not the same day - COF closed Discover on 2025-05-18 (a Sunday) and CRSP
+# carried the combined count from 2025-05-30. Bridging from the stated date
+# instead would add the target's liabilities to a week that still has only the
+# acquirer's equity, which is the same error with the sign flipped.
+MERGER_EFFECTIVE_LOOKBACK_DAYS = 10
+MERGER_EFFECTIVE_LOOKAHEAD_DAYS = 120
+
+
+def _merger_liab_sql() -> str:
+    """Per merger: the liabilities to add, and the week they start applying.
+
+    target_liab - liab_override wins, since it exists for targets that file no
+    Y-9C and for deals where the filed entity is not the entity acquired.
+    Otherwise the target's own last filing on or before the closing, the most
+    recent statement of what the acquirer took on.
+
+    effective_date - the first day the acquirer's market cap re-bases, found
+    the same way check_issuance_bs_lag finds it: (mcap_t / mcap_t-1) / (1+retx)
+    departs from 1 only when the share count changed, and is immune to splits.
+    Timing the bridge off the data rather than off the stated closing date
+    keeps numerator and denominator changing on the same day, whatever the
+    vendor does - COF closed Discover on 2025-05-18 but CRSP carried the
+    combined count from 2025-05-30. The bar is MERGER_REBASE_TOL, well below
+    the blind-scan threshold, because the merger row has already asserted that
+    a deal happened. Earliest match wins: where a window holds more than one
+    candidate the later ones are subsequent events, not this one.
+    """
+    return f"""
+        SELECT ml.acquirer_rssd, ml.target_rssd, ml.close_date, ml.name,
+               ml.target_liab, ml.target_filing,
+               MIN(iss.date) AS effective_date
+        FROM (
+          SELECT me.acquirer_rssd, me.target_rssd, me.close_date, me.name,
+                 COALESCE(
+                   me.liab_override,
+                   (SELECT t.total_liab
+                    FROM ext_y9c.bs_panel_y9c t
+                    WHERE t.id_rssd = me.target_rssd
+                      AND t.date <= me.close_date
+                      AND t.total_liab IS NOT NULL
+                    ORDER BY t.date DESC
+                    LIMIT 1)
+                 ) AS target_liab,
+                 CASE WHEN me.liab_override IS NULL THEN
+                   (SELECT t.date
+                    FROM ext_y9c.bs_panel_y9c t
+                    WHERE t.id_rssd = me.target_rssd
+                      AND t.date <= me.close_date
+                      AND t.total_liab IS NOT NULL
+                    ORDER BY t.date DESC
+                    LIMIT 1)
+                 END AS target_filing
+          FROM merger_event me
+        ) ml
+        LEFT JOIN link l ON l.rssd = ml.acquirer_rssd
+        LEFT JOIN (
+          SELECT permco, date FROM (
+            SELECT permco, date,
+                   (market_cap / NULLIF(LAG(market_cap) OVER w, 0))
+                   / NULLIF(1 + retx, 0) AS ratio
+            FROM equity_daily
+            WHERE market_cap IS NOT NULL AND retx IS NOT NULL
+            WINDOW w AS (PARTITION BY permco ORDER BY date)
+          )
+          WHERE ratio IS NOT NULL AND ratio - 1 > {config.MERGER_REBASE_TOL}
+        ) iss
+          ON iss.permco = l.permco
+         AND iss.date >= ml.close_date - INTERVAL {MERGER_EFFECTIVE_LOOKBACK_DAYS} DAY
+         AND iss.date <= ml.close_date + INTERVAL {MERGER_EFFECTIVE_LOOKAHEAD_DAYS} DAY
+        GROUP BY ml.acquirer_rssd, ml.target_rssd, ml.close_date, ml.name,
+                 ml.target_liab, ml.target_filing
+    """
+
+
+def check_mergers_resolvable(
+    conn: duckdb.DuckDBPyConnection,
+    permcos: list[int],
+) -> list[tuple]:
+    """Mergers in scope that cannot be turned into a bridge.
+
+    Three ways to fail, all config errors rather than data conditions:
+    no target liabilities (target files nothing and no liab= was given); no
+    effective date (the acquirer's share count never re-bases near the stated
+    close, so either the date is wrong or the deal was cash-only and does not
+    belong here); or a target whose last filing is far older than the close,
+    which means the RSSD names an entity that had stopped filing under its own
+    charter. Each bridges nothing, or bridges the wrong number, while looking
+    like it worked - so the caller aborts. Must run with ext_y9c attached."""
+    if not permcos:
+        return []
+    permco_str = ",".join(str(int(p)) for p in permcos)
+    return conn.execute(
+        f"""
+        WITH ml AS ({_merger_liab_sql()})
+        SELECT acquirer_rssd, close_date, target_rssd, name,
+               CASE WHEN target_liab IS NULL THEN 'no target liabilities'
+                    WHEN target_filing IS NOT NULL
+                     AND date_diff('day', target_filing, close_date)
+                         > {config.MERGER_TARGET_STALE_DAYS}
+                      THEN 'target last filed ' || target_filing
+                           || ', stale at close - wrong RSSD?'
+                    ELSE 'no share-count change near close' END AS reason
+        FROM ml
+        WHERE (target_liab IS NULL
+               OR effective_date IS NULL
+               OR (target_filing IS NOT NULL
+                   AND date_diff('day', target_filing, close_date)
+                       > {config.MERGER_TARGET_STALE_DAYS}))
+          AND acquirer_rssd IN (
+            SELECT DISTINCT rssd FROM link WHERE permco IN ({permco_str})
+          )
+        ORDER BY close_date
+        """
+    ).fetchall()
+
+
 def build_fred_weekly(
     conn: duckdb.DuckDBPyConnection,
     *,
@@ -92,6 +210,18 @@ def build_pd_input(
             cr_attached = True
         except FileNotFoundError:
             pass
+
+        unresolved = check_mergers_resolvable(conn, permcos)
+        if unresolved:
+            rows = "; ".join(
+                f"acquirer {a} close {c} target {t} ({n}): {why}"
+                for a, c, t, n, why in unresolved
+            )
+            raise ValueError(
+                f"{len(unresolved)} merger(s) in mergers.txt cannot be bridged: "
+                f"{rows}. Add an explicit liab= for a target that files nothing, "
+                "correct the close= date, or remove the line. Bridging nothing "
+                "silently would leave the PD understated while looking corrected.")
 
         sql = f"""
         WITH scoped_daily AS (
@@ -185,9 +315,45 @@ def build_pd_input(
             COALESCE(y9c_equity,      cr_equity)      AS equity
           FROM with_cr
         ),
+        -- Pro-forma merger bridge. Bridge exactly the weeks where the target
+        -- is in the numerator but not yet the denominator. The two sides
+        -- arrive on different clocks and must be tested separately:
+        --   equity in       -> week_date >= effective_date (the day the share
+        --                      count actually re-based, from the data)
+        --   liabilities out -> bs_quarter_end < close_date (a filing dated on
+        --                      or after the closing already consolidates it)
+        -- Testing only the effective date would double-count whenever the
+        -- vendor's share count lags past the next filing: Huntington closed
+        -- Veritex on 2025-10-20, CRSP never picked it up, and the combined
+        -- count first appears on 2026-01-02 - by which time the 2025-12-31
+        -- Y-9C already contains Veritex's liabilities.
+        -- SUM because a bank can close two deals inside one quarter.
+        merger_liab AS ({_merger_liab_sql()}),
+        bridge AS (
+          SELECT wb.permco, wb.week_date, SUM(ml.target_liab) AS bridge_liab
+          FROM with_bs wb
+          JOIN merger_liab ml
+            ON ml.acquirer_rssd = wb.rssd
+           AND ml.effective_date <= wb.week_date
+           AND ml.close_date     >  wb.bs_quarter_end
+          WHERE ml.target_liab IS NOT NULL AND ml.effective_date IS NOT NULL
+            AND wb.total_liab IS NOT NULL
+          GROUP BY wb.permco, wb.week_date
+        ),
+        with_bridge AS (
+          SELECT wb.* EXCLUDE (total_liab, bs_source),
+                 wb.total_liab AS total_liab_reported,
+                 wb.total_liab + COALESCE(br.bridge_liab, 0) AS total_liab,
+                 (br.bridge_liab IS NOT NULL) AS bs_bridged,
+                 CASE WHEN br.bridge_liab IS NOT NULL AND wb.bs_source IS NOT NULL
+                      THEN wb.bs_source || '+proforma'
+                      ELSE wb.bs_source END AS bs_source
+          FROM with_bs wb
+          LEFT JOIN bridge br USING (permco, week_date)
+        ),
         joined AS (
           SELECT wb.*, fw.r_decimal AS r
-          FROM with_bs wb
+          FROM with_bridge wb
           LEFT JOIN fred_weekly fw USING (week_date)
         ),
         flagged AS (
@@ -209,7 +375,8 @@ def build_pd_input(
           CASE WHEN equity_lag_days IS NULL OR equity_lag_days > {EQUITY_STALE_DAYS}
                THEN NULL ELSE n_obs_252 END AS n_obs_252,
           r,
-          bs_quarter_end, total_liab, assets, equity,
+          bs_quarter_end, total_liab, total_liab_reported, bs_bridged,
+          assets, equity,
           CASE
             WHEN total_liab IS NULL OR total_liab <= 0 THEN NULL
             WHEN equity_lag_days IS NULL OR equity_lag_days > {EQUITY_STALE_DAYS} THEN NULL
@@ -231,7 +398,8 @@ def build_pd_input(
             INSERT INTO pd_input (
               permco, week_date, date_eff, rssd, ticker,
               market_cap, price, sE, n_obs_252, r,
-              bs_quarter_end, total_liab, assets, equity, E_scaled,
+              bs_quarter_end, total_liab, total_liab_reported, bs_bridged,
+              assets, equity, E_scaled,
               bs_age_days, bs_stale, equity_lag_days, equity_stale,
               data_source, bs_source
             )

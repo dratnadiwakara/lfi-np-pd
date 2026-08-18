@@ -1,0 +1,61 @@
+# lfi-np-pd merger list - drives the pro-forma liability bridge.
+#
+# Why this file exists: on the day an acquisition closes, the acquirer's share
+# count (and so its market cap) jumps to the combined company, but total_liab
+# stays on the acquirer's last solo Y-9C until the next quarter lands. E_scaled
+# = market_cap / total_liab then divides a combined numerator by a solo
+# denominator and the PD reads too low for up to a quarter. Each line here adds
+# the target's own last-filed liabilities for exactly those in-between weeks.
+#
+# Format - one deal per line:
+#   <acquirer_rssd>  <target_rssd>  close=YYYY-MM-DD  [liab=<thousands USD>]
+#
+#   target_rssd  RSSD of the acquired entity in the Y-9C panel. Its last
+#                filing on or before close= is what gets added.
+#   close=       deal completion date (not announcement).
+#   liab=        explicit target liabilities, in thousands, overriding the
+#                lookup. Needed when the target files no Y-9C (brokers, asset
+#                managers) or when the filed entity is not the entity acquired.
+#                Use target_rssd 0 together with liab= when no filer exists.
+#                Always say where the number came from in the comment.
+#
+# Only material deals belong here: below roughly 4% of the acquirer's
+# liabilities the distortion is smaller than the rounding on the number being
+# read. Cash-only deals do NOT belong here at all - with no shares issued there
+# is no equity re-base, so there is no mismatch to correct (PNC/BBVA USA 2021,
+# JPM/First Republic 2023, USB/Union Bank 2022 are all correctly absent).
+# Neither do capital raises, which have no target: BAC's 2017 Berkshire warrant
+# exercise, RF's 2012 TARP repayment offering, MS's 2011 MUFG conversion, STT's
+# 2021 offering and KEY's 2024-25 Scotiabank investment all stay
+# issuance_bs_lag flags, which is the honest outcome.
+#
+# Every line is machine-checked by tests/test_merger_bridge.py, which compares
+# (acquirer last solo filing + target last filing) against what the acquirer
+# actually filed the quarter after the close. A wrong RSSD or a wrong date
+# fails loudly there rather than quietly biasing a PD. The error shown against
+# each line below is that check's output. It is not pure bridge error: it also
+# contains whatever the acquirer's own balance sheet did that quarter, which is
+# why Schwab and Morgan Stanley - both of which grew heavily in Q4 2020
+# independent of their deals - sit furthest from zero.
+#
+# Edit this file, then re-run:  lfinp update
+
+2277860  0        close=2012-02-17 liab=84781000   # COF / ING Direct USA (ING Bank fsb, a thrift: no Y-9C. Liabilities at fair value on the acquisition date, COF Q2-2012 10-Q Note 2)  +1.4%
+1075612  1075911  close=2014-10-01   # FCNCA / First Citizens Bancorporation, Inc. (South Carolina)  +0.2%
+1074156  1117156  close=2015-08-01   # BB&T (now Truist) / Susquehanna Bancshares  +0.1%
+1037003  2367556  close=2015-11-01   # M&T / Hudson City Bancorp  +8.1% (Hudson City was deleveraging between its last filing and the close)
+1074156  1117026  close=2016-04-01   # BB&T (now Truist) / National Penn Bancshares  +0.3%
+1068025  2648693  close=2016-07-29   # KEY / First Niagara Financial Group (consideration issued 7/29; merger certificate effective 8/1)  +3.8%
+1068191  1070804  close=2016-08-16   # HBAN / FirstMerit Corporation  -0.9%
+1070345  1090987  close=2019-03-22   # FITB / MB Financial  -0.7%
+1074156  1131787  close=2019-12-06   # BB&T / SunTrust Banks -> Truist  -0.2%
+2162966  3412583  close=2020-10-02   # MS / E*TRADE Financial (an SLHC, so it does file a Y-9C)  -8.1%
+1026632  0        close=2020-10-06 liab=46433000   # SCHW / TD Ameritrade Holding (a broker, no Y-9C. Total liabilities at 2020-09-30, its last fiscal quarter before the close)  -11.9%
+1068191  1201934  close=2021-06-09   # HBAN / TCF Financial  +0.9% (RSSD 1201934, not TCF's original 2389941: the 2019 TCF/Chemical Financial merger of equals kept the TCF name on Chemical's charter, so 2389941 stops filing at 2019-06-30 and would silently bridge a two-year-stale figure)
+1075612  1036967  close=2022-01-03   # FCNCA / CIT Group  +2.5%
+1037003  3650152  close=2022-04-01   # M&T / People's United Financial  +5.2%
+1132449  2477754  close=2022-04-06   # CFG / Investors Bancorp  -3.6%
+2277860  3846375  close=2025-05-18   # COF / Discover Financial Services  +2.0%
+1068191  4105266  close=2025-10-20   # HBAN / Veritex Holdings  -0.8% (bridges no weeks: CRSP never picked up the new share count, so the equity re-base lands 2026-01-02, after the 2025-12-31 Y-9C already consolidated Veritex. Kept as documentation of the deal)
+1070345  1199844  close=2026-02-01   # FITB / Comerica  +0.8%
+1068191  0        close=2026-02-01 liab=47285383   # HBAN / Cadence Bank (a bank with no holding company, so it files a Call Report and not a Y-9C. Total liabilities at 2025-12-31)  -1.9%

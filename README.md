@@ -159,10 +159,10 @@ knowing about. All warn-level (`checks --strict` exits 1).
 | peer_divergence | daily return > 15% from the same-day median across the scoped banks | a crash moves every bank; a data error moves one. COVID-March passes (peer gap ~0.03); a share-issuance artifact fails (one bank +66%, peers flat) |
 | pd_plausibility | week-over-week np_PD ratio outside [1/3, 3] or sE ratio > 1.5 | coarse net for anything the above miss |
 | pd_decoupling | np_PD/merton_PD ratio moves > 2× while sE is stable | isolates value-surface/kernel behaviour from input problems |
-| bs_jumps | quarter-over-quarter `total_liab` change > 30% | `total_liab` drives `E_scaled`; a bad Y-9C row distorts PD like a bad share count |
+| bs_jumps | quarter-over-quarter `total_liab` change > 30% | `total_liab` drives `E_scaled`; a bad Y-9C row distorts PD like a bad share count. Reads `total_liab_reported`, so the merger bridge's deliberate mid-quarter change is not mistaken for a filing that never happened |
 | fallback_rate | > 20% of the last 52 weeks used value-surface extrapolation | high rate means the PD is interpolation, not measurement |
 | panel_revisions | historical `np_PD` values that changed since the previous run | `pull_diff` covers inputs; this covers the numbers people cite |
-| issuance_bs_lag | market cap changed without a matching return, and the balance sheet still predates it | Y-9C is quarterly, so between an issuance and the next filing the kernel divides post-issuance equity by pre-issuance liabilities. E is overstated, so the PD is **understated** — it fails in the reassuring direction. Detected as `(mcap_t/mcap_t-1)/(1+retx_t)`, which is ~1.0 unless the share count moved and is immune to splits. Clears itself when `bs_quarter_end` passes the issuance |
+| issuance_bs_lag | market cap changed without a matching return, and the balance sheet still predates it | Y-9C is quarterly, so between an issuance and the next filing the kernel divides post-issuance equity by pre-issuance liabilities. E is overstated, so the PD is **understated** — it fails in the reassuring direction. Detected as `(mcap_t/mcap_t-1)/(1+retx_t)`, which is ~1.0 unless the share count moved and is immune to splits. Clears itself when `bs_quarter_end` passes the issuance. Weeks corrected by the merger bridge are excluded, so what remains is the to-do list: a deal missing from `mergers.txt`, or a capital raise, which has no target and cannot be bridged |
 | group_composition | a group index gained or lost a member | a cap-weighted index re-levels when membership changes; without this a reader takes that step for risk. The only check the group panel needs — every other anomaly is already caught on the member banks it sums |
 
 **The artifact fingerprint:** a bad return enters → sE steps → PD is wrong
@@ -176,10 +176,44 @@ issuance could not fabricate one, and sE never moved. But market cap went
 landed on 2025-07-04. For five weeks `E_scaled` read 0.28 against a true ~0.22
 and np_PD read 0.164 against 0.231 the week before. Every other gate passed: the
 quarter-over-quarter balance-sheet jump was +27.4% (`bs_jumps` needs 30%) and
-the PD ratio was 0.71 (`pd_plausibility` needs 3×). `issuance_bs_lag` exists for
-that window. It cannot correct the number — the true interim liability figure
-does not exist in any source here — but it names the weeks where the PD is
-optimistic and by how much the equity base moved.
+the PD ratio was 0.71 (`pd_plausibility` needs 3×). `issuance_bs_lag` names that
+window.
+
+### The pro-forma merger bridge
+
+For acquisitions — not capital raises — that window can be closed rather than
+just flagged. `mergers.txt` lists completed deals; for the weeks where the
+target is in the numerator but not yet the denominator, the panel adds the
+target's own last-filed liabilities to the acquirer's.
+
+For COF that is 430.06 + Discover's 128.95 = **559.01bn** against the 548.01bn
+COF actually filed for Q2 — **2.0% out**, where doing nothing is **27.4%** out.
+np_PD goes 0.164 → 0.190 against a true 0.187. The residual is purchase
+accounting, which no source gives mid-quarter, and it errs high rather than low.
+
+Two timings matter and they are not the same date:
+
+- **Liabilities** enter on the closing date. A filing dated on or after the
+  close already consolidates the target.
+- **Equity** enters when the share count actually re-bases in the data, which
+  the panel detects rather than assumes. CRSP carried COF's combined count from
+  2025-05-30, twelve days after the legal close; bridging from the stated date
+  would have put Discover's liabilities into a week holding only Capital One's
+  equity, the same error with the sign flipped. Huntington is the opposite case
+  — CRSP never picked up Veritex at all, so the re-base lands after the filing
+  that already consolidates it, and no week is bridged.
+
+`total_liab` carries the bridged figure and feeds `E_scaled`; `total_liab_reported`
+always keeps the number as filed; `bs_bridged` marks the weeks and `bs_source`
+reads `y9c+proforma`. A merger that cannot be resolved — no target liabilities,
+or no share-count change near the stated close — **aborts the build**. Bridging
+nothing while appearing corrected is the one outcome worse than not bridging.
+
+Every line is machine-checked against what the acquirer actually filed the
+following quarter (`tests/test_merger_bridge.py`), so a wrong RSSD or date fails
+loudly instead of quietly biasing a PD. Cash-only deals and capital raises have
+no equity re-base and so no mismatch to correct; they stay `issuance_bs_lag`
+flags, which is the honest outcome.
 
 **Acknowledgement is what keeps this usable.** Every real crisis (1987,
 2008–09, COVID, SVB) trips these forever otherwise, and an operator who

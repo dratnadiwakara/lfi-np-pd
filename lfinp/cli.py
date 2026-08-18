@@ -222,6 +222,7 @@ def cmd_init(args) -> int:
         for rssd, permco in sorted(mapping.items()):
             _log(f"  rssd {rssd} -> permco {permco}")
         _log(f"bank_group: {db_mod.sync_bank_groups(conn, mapping)} bank(s)")
+        _log(f"merger_event: {db_mod.sync_mergers(conn)} merger(s)")
 
         secrets = config.load_secrets()
         wdb = sources.connect_wrds(secrets.wrds_username, secrets.wrds_password)
@@ -289,6 +290,7 @@ def cmd_update(args) -> int:
         init_schema(conn)
         mapping, all_permcos, live_permcos = _scope(conn)
         _log(f"bank_group: {db_mod.sync_bank_groups(conn, mapping)} bank(s)")
+        _log(f"merger_event: {db_mod.sync_mergers(conn)} merger(s)")
         secrets = config.load_secrets()
 
         n = sources.fetch_dgs10_incremental(conn, secrets.fred_api_key)

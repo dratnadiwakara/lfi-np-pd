@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +27,9 @@ LFINP_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = LFINP_ROOT / "data"
 INPUTS_DIR = LFINP_ROOT / "inputs"
 BANKS_PATH = Path(os.getenv("LFINP_BANKS_PATH", str(LFINP_ROOT / "banks.txt")))
+MERGERS_PATH = Path(
+    os.getenv("LFINP_MERGERS_PATH", str(LFINP_ROOT / "mergers.txt"))
+)
 
 # -- External data (sibling repo) ---------------------------------------------
 
@@ -113,6 +117,23 @@ ISSUANCE_RATIO_TOL = float(os.getenv("LFINP_ISSUANCE_RATIO", "0.10"))
 # market cap; below that the distortion is smaller than the rounding on the
 # number being read.
 ISSUANCE_GROUP_CAP_SHARE = float(os.getenv("LFINP_ISSUANCE_GROUP_SHARE", "0.02"))
+# The merger bridge reuses the same ratio to find the day a deal's shares
+# actually landed, but with a much lower bar. ISSUANCE_RATIO_TOL is set for
+# blind scanning, where a false positive costs an operator's attention; here a
+# line in mergers.txt has already asserted the deal happened, so the job is to
+# time a known event, not discover an unknown one. At 10% the bridge would miss
+# BB&T/Susquehanna (6.4%) and BB&T/National Penn (5.8%) entirely. Verified on
+# the real panel: at 2% every merger window contains exactly one candidate day
+# except two, where the earliest is the correct one.
+MERGER_REBASE_TOL = float(os.getenv("LFINP_MERGER_REBASE_TOL", "0.02"))
+# How stale a target's last Y-9C may be at the closing date. A live target files
+# quarterly, so the gap should be one quarter plus a filing lag. A much older
+# figure means the RSSD is wrong - usually an entity that stopped filing under
+# its own charter. Observed: HBAN/TCF 2021, where TCF's original RSSD 2389941
+# stops at 2019-06-30 because the 2019 TCF/Chemical merger of equals put the TCF
+# name on Chemical's charter (1201934). Bridging 2389941 would have silently
+# used a two-year-stale balance sheet.
+MERGER_TARGET_STALE_DAYS = int(os.getenv("LFINP_MERGER_TARGET_STALE_DAYS", "200"))
 
 # Shares-anchor tolerance: after the CRSP edge, Yahoo's share count is
 # trusted only once it is within this fraction of the CRSP shrout anchor.
@@ -262,6 +283,93 @@ def yahoo_rssds() -> list[int]:
 def bank_groups() -> dict[int, Optional[str]]:
     """rssd -> business-model group."""
     return {b.rssd: b.group for b in load_banks()}
+
+
+# -- Mergers -------------------------------------------------------------------------
+#
+# An acquisition re-bases market cap on the closing day but leaves total_liab on
+# the acquirer's last solo filing until the next Y-9C. E_scaled = market_cap /
+# total_liab then compares a combined numerator against a solo denominator and
+# the PD reads too low for up to a quarter (COF/Discover 2025: np_PD 0.164 for
+# five weeks against a contemporaneous 0.187). This list drives the pro-forma
+# bridge in panel.build_pd_input that closes that window.
+
+
+@dataclass(frozen=True)
+class Merger:
+    acquirer_rssd: int
+    target_rssd: int         # 0 when the target files nothing and liab is given
+    close_date: date
+    comment: str
+    # Explicit target liabilities in thousands USD, for targets that file no
+    # Y-9C (brokers, asset managers) or where the filed entity is not the
+    # entity acquired (FCNCA bought Silicon Valley Bridge Bank, not SVB
+    # Financial Group). None = look the target up in the Y-9C panel.
+    liab_override: Optional[float] = None
+
+
+def load_mergers(path: Optional[Path] = None) -> list[Merger]:
+    """Parse mergers.txt: '<acquirer_rssd> <target_rssd> close=YYYY-MM-DD [liab=N]'.
+
+    Missing file is not an error - it means no bridges, which is the behaviour
+    this repo had before the feature existed. Anything present must parse
+    exactly; a silently-dropped merger would restore the distortion it exists
+    to remove.
+    """
+    p = Path(path) if path else MERGERS_PATH
+    if not p.exists():
+        return []
+    mergers: list[Merger] = []
+    seen: set[tuple[int, int, date]] = set()
+    for raw in p.read_text(encoding="utf-8").splitlines():
+        line, _, comment = raw.partition("#")
+        tokens = line.split()
+        if not tokens:
+            continue
+        if len(tokens) < 2:
+            raise ValueError(
+                f"Expected '<acquirer_rssd> <target_rssd> close=...' on line: {raw!r}")
+        try:
+            acquirer = int(tokens[0])
+            target = int(tokens[1])
+        except ValueError as exc:
+            raise ValueError(f"Non-integer RSSD on line: {raw!r}") from exc
+        close: Optional[date] = None
+        liab: Optional[float] = None
+        for tok in tokens[2:]:
+            key, sep, val = tok.partition("=")
+            if not sep:
+                raise ValueError(f"Unknown flag {tok!r} on line: {raw!r}")
+            key = key.lower()
+            if key == "close":
+                try:
+                    close = date.fromisoformat(val)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Bad close date {val!r} on line: {raw!r} - "
+                        "expected YYYY-MM-DD") from exc
+            elif key == "liab":
+                liab = float(val)
+                if liab <= 0:
+                    raise ValueError(f"liab must be > 0 on line: {raw!r}")
+            else:
+                raise ValueError(f"Unknown flag {key!r} on line: {raw!r}")
+        if close is None:
+            raise ValueError(f"Missing close= on line: {raw!r}")
+        if acquirer == target:
+            raise ValueError(f"Acquirer equals target on line: {raw!r}")
+        if target == 0 and liab is None:
+            raise ValueError(
+                f"target_rssd 0 requires liab= on line: {raw!r} - a target with "
+                "no filer and no explicit figure cannot be bridged")
+        key3 = (acquirer, target, close)
+        if key3 in seen:
+            raise ValueError(f"Duplicate merger {key3} in {p}")
+        seen.add(key3)
+        mergers.append(Merger(acquirer_rssd=acquirer, target_rssd=target,
+                              close_date=close, comment=comment.strip(),
+                              liab_override=liab))
+    return mergers
 
 
 # -- Secrets ---------------------------------------------------------------------------

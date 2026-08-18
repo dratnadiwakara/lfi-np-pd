@@ -4,6 +4,132 @@ Chronological log. Newest on top.
 
 ---
 
+## 2026-08-17 — pro-forma merger bridge (mergers.txt)
+
+`check_issuance_bs_lag` (added 2026-08-15) detected the post-merger window but
+ended with "No correction is attempted." It now corrects it for acquisitions.
+
+The distortion, sized: for COF/Discover the published np_PD was **0.1644** for
+five weeks. Recomputing on COF's own inputs with the Q2 liabilities that were
+not yet available gives **0.1873**; the week before the close read 0.2311. So of
+the 0.067 drop, **0.044 was real** (Discover did add more equity than
+liabilities) and **0.023 was the stale denominator** — a third of it. The kernel
+reproduced both stored values exactly (0.231139, 0.164441), so the
+counterfactual is sound rather than indicative.
+
+Approach: `mergers.txt` (banks.txt pattern — strict parse, mirrored into
+`merger_event` by full replace) lists completed deals; `build_pd_input` adds the
+target's own last-filed liabilities for the weeks where the target is in the
+numerator but not the denominator. `total_liab` carries the bridged figure,
+`total_liab_reported` keeps what was filed, `bs_bridged` marks the week.
+Accuracy on COF: 559.01bn bridged vs 548.01bn filed = **+2.0%**, against −27.4%
+uncorrected. It errs high (summed liabilities exceed fair-valued ones), which is
+the right direction to be wrong in.
+
+### Three things the real data corrected during the build
+
+- **The legal close is not the day equity re-bases.** First cut keyed the bridge
+  off `close=`. COF closed 2025-05-18; CRSP carried the combined share count
+  from 2025-05-30. That put Discover's liabilities into the 2025-05-23 week,
+  which still held only Capital One's equity, and drove `E_scaled` 0.165 → 0.127
+  — the same error with the sign flipped. Fix: detect the re-base day from the
+  data, the same `(mcap_t/mcap_t-1)/(1+retx_t)` ratio `issuance_bs_lag` uses.
+- **Equity and liabilities are on different clocks, and testing one is not
+  enough.** Huntington closed Veritex 2025-10-20 and CRSP *never* picked up the
+  new count — it first appears 2026-01-02 via Yahoo, by which time the
+  2025-12-31 Y-9C already consolidates Veritex. Keying only off the effective
+  date would have double-counted. Final predicate: equity in
+  (`week_date >= effective_date`) **and** liabilities out
+  (`bs_quarter_end < close_date`). Consequence worth knowing: most deals bridge
+  *no* weeks, because CRSP usually updates after the next filing. 18 deals
+  produce 93 bridged weeks across 10 banks.
+- **A target can keep its name while losing its charter.** HBAN bought TCF
+  Financial in 2021, but TCF's original RSSD 2389941 stops filing at
+  2019-06-30: the 2019 TCF/Chemical Financial merger of equals put the TCF name
+  on Chemical's charter (1201934). The lookup *succeeds* on 2389941 and returns
+  a two-year-stale balance sheet, so a missing-value check cannot catch it.
+  Added `MERGER_TARGET_STALE_DAYS` (200): a target's last filing more than two
+  quarters before the close aborts the build as a probable wrong RSSD.
+  `liab=` rows are exempt, since they carry their provenance in the comment.
+- **The blind-scan threshold is the wrong bar for a known event.**
+  `ISSUANCE_RATIO_TOL` is 10% because a false positive costs operator attention.
+  With a merger row asserting the deal, the job is timing a known event, so
+  `MERGER_REBASE_TOL` is 2% — at 10% the bridge silently missed
+  BB&T/Susquehanna (6.4%) and BB&T/National Penn (5.8%). Verified: at 2% every
+  merger window holds exactly one candidate day bar two, where the earliest is
+  correct.
+
+### Backfill to 2012, and why it is safe to have gone wide
+
+19 deals. Every line is machine-checked against what the acquirer actually filed
+the next quarter (`tests/test_merger_bridge.py`), which is what made a wide
+backfill safer than a narrow one — it also *settled* an identity I could not
+confirm from any source: First Citizens Bancorporation of South Carolina is
+RSSD 1075911 (+0.2%, vs −0.5% for the bank-level figure).
+
+The first live run then caught its own omission: HBAN/TCF had been dropped while
+assembling the file, and `issuance_bs_lag` still flagged those 2021 weeks. That
+is the intended loop — the flag is the to-do list, and the residual after
+bridging is what has no merger behind it.
+
+Errors run −11.9% to +8.1%, most within 3%. The tolerance is 15% because the
+check mixes bridge accuracy with whatever the acquirer's own balance sheet did
+that quarter — Schwab and Morgan Stanley both grew heavily in Q4 2020
+independent of their deals, which is why they sit furthest out.
+
+Deliberately excluded, and these should stay excluded: cash-only deals
+(PNC/BBVA USA, JPM/First Republic, USB/Union Bank) have no equity re-base and so
+no mismatch; capital raises (BAC's 2017 Berkshire warrants, RF 2012, MS 2011
+MUFG conversion, STT 2021, KEY's Scotiabank investment) have no target to bridge
+and stay `issuance_bs_lag` flags.
+
+PD effect where it fires: always upward, removing understatement. FCNCA +0.105
+average (CIT was 87.6% of its liabilities), KEY +0.072, M&T +0.057, COF +0.050,
+FITB +0.049; Morgan Stanley and Schwab under 0.005.
+
+### A pre-existing bug this surfaced: pd_panel could silently go stale
+
+`assemble_inputs` skipped any `(week_date, permco)` already in `pd_panel`. That
+is only safe if "already computed" means "computed from the inputs present
+now" — and it did not. `update` recomputes a rolling window driven by the Yahoo
+re-pull span; any input revision older than that window was skipped forever.
+
+Editing `mergers.txt` rewrites `total_liab` for weeks going back to 2012, so the
+first live backfill left **75 of 96 bridged weeks carrying pre-bridge PDs**.
+Nothing caught it: no check compares `pd_panel` against `pd_input`, so the two
+simply disagreed. Both `update` runs exited 0. It was found by querying the
+published panel rather than the input table the bridge writes to — the lesson
+being that verifying a write at its source proves nothing about what is served.
+
+Fixed generally, not for mergers: a stored row is excluded only when its five
+kernel inputs (`total_liab`, `market_cap_raw`, `sE`, `r`, `E_scaled`) still match
+`pd_input` within `PANEL_REVISION_TOL`. Same rule on
+`group_input`/`group_panel`, since groups sum member history. Any input revision
+now pulls its week back into the compute set regardless of age. Four tests pin
+it, including that ordinary float round-tripping must *not* trigger a recompute
+— otherwise every week recomputes forever and the incremental path is dead code.
+
+Worth considering as a follow-up: a `panel_staleness` check that fails when
+`pd_panel` disagrees with `pd_input`. The fix closes the hole, but nothing yet
+*detects* the condition, and this class of defect is invisible from exit codes.
+
+### Unrelated finding: a share-count discontinuity at the CRSP/Yahoo seam
+
+While hunting merger candidates: **twelve of the 25 banks jump on 2026-01-02**,
+all `source='yfinance'`, ratios 1.010 to 1.120. That is the first Yahoo day
+after the CRSP edge (2025-12-31), so it is the share-count basis changing, not
+twelve simultaneous corporate actions. Two crossed the 5% screen: HBAN 1.079
+(which is genuinely Veritex, arriving 74 days late because CRSP never updated
+shrout) and **FCNCA 1.120, which has no corporate action behind it at all** —
+First Citizens was *buying back* stock through 2025, so the count should have
+fallen. CRSP shrout 11,430k at 2025-12-31 vs Yahoo 12,804k.
+
+This feeds `market_cap` and therefore `E_scaled` and the PD for every affected
+bank from 2026-01-02 onward. It is a separate defect from anything in this
+entry, it is not fixed here, and it wants its own investigation — the
+`ground_shares_to_crsp` anchor logic (invariant 3) is the obvious place to look,
+since the ten sub-5% cases slip under `ISSUANCE_RATIO_TOL` and never flag.
+
 ## 2026-08-15 — repo created
 
 Motivation: bank-pd's Yahoo overlay derived `retx` from market-cap

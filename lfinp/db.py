@@ -98,6 +98,21 @@ CREATE TABLE IF NOT EXISTS bank_group (
   synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Completed acquisitions, mirrored from mergers.txt on every run. Drives the
+-- pro-forma liability bridge: between a closing and the acquirer's next Y-9C,
+-- market cap is the combined company but total_liab is still the acquirer
+-- alone, so the PD reads too low. mergers.txt stays the source of truth; this
+-- table is derived and safe to drop.
+CREATE TABLE IF NOT EXISTS merger_event (
+  acquirer_rssd INTEGER NOT NULL,
+  target_rssd   INTEGER NOT NULL,   -- 0 when the target files nothing
+  close_date    DATE    NOT NULL,
+  liab_override DOUBLE,             -- thousands USD; NULL = look the target up
+  name          TEXT,
+  synced_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (acquirer_rssd, target_rssd, close_date)
+);
+
 -- Cap-weighted daily index per group: the equity of the group treated as one
 -- merged bank. ret is NULL on the first day (no lagged weight), same as retx.
 CREATE TABLE IF NOT EXISTS group_daily (
@@ -176,7 +191,9 @@ CREATE TABLE IF NOT EXISTS pd_input (
   n_obs_252 INTEGER,
   r         DOUBLE,
   bs_quarter_end DATE,
-  total_liab DOUBLE,
+  total_liab DOUBLE,                        -- bridged where bs_bridged; feeds E_scaled
+  total_liab_reported DOUBLE,               -- always the figure as filed
+  bs_bridged BOOLEAN,                       -- TRUE = pro-forma merger bridge applied
   assets    DOUBLE,
   equity    DOUBLE,
   E_scaled  DOUBLE,
@@ -185,7 +202,7 @@ CREATE TABLE IF NOT EXISTS pd_input (
   equity_lag_days INTEGER,
   equity_stale    BOOLEAN,
   data_source   TEXT,                       -- 'crsp' | 'yfinance' at date_eff
-  bs_source     TEXT,                       -- 'y9c' | 'call_report' | NULL
+  bs_source     TEXT,       -- 'y9c' | 'call_report' | 'y9c+proforma' | NULL
   built_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (permco, week_date)
 );
@@ -312,6 +329,12 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
     # bank_group is derived, but dropping it here would empty it for read-only
     # commands until the next update, so add the column in place instead.
     conn.execute("ALTER TABLE bank_group ADD COLUMN IF NOT EXISTS permco INTEGER")
+    # Same reason: pd_input predates the merger bridge in existing stores, and
+    # it is rebuilt wholesale every run, so widening in place is enough.
+    conn.execute(
+        "ALTER TABLE pd_input ADD COLUMN IF NOT EXISTS total_liab_reported DOUBLE")
+    conn.execute(
+        "ALTER TABLE pd_input ADD COLUMN IF NOT EXISTS bs_bridged BOOLEAN")
 
 
 def sync_bank_groups(
@@ -333,6 +356,24 @@ def sync_bank_groups(
         [(b.rssd, b.group, pm.get(b.rssd), b.dead, b.comment) for b in banks],
     )
     return len(banks)
+
+
+def sync_mergers(conn: duckdb.DuckDBPyConnection) -> int:
+    """Mirror mergers.txt into merger_event. Full replace, same reasoning as
+    sync_bank_groups: a deal removed from the file must stop bridging, and a
+    stale bridge is worse than none because it moves a PD with no visible
+    cause."""
+    mergers = config.load_mergers()
+    conn.execute("DELETE FROM merger_event")
+    if mergers:
+        conn.executemany(
+            "INSERT INTO merger_event "
+            "(acquirer_rssd, target_rssd, close_date, liab_override, name) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [(m.acquirer_rssd, m.target_rssd, m.close_date,
+              m.liab_override, m.comment) for m in mergers],
+        )
+    return len(mergers)
 
 
 def max_value(

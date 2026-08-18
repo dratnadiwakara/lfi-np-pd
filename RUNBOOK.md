@@ -117,7 +117,7 @@ on from — escalate. Nothing else in the pipeline will catch it a second time.
 | `pd_decoupling` | the two PD measures stopped agreeing | not a data issue — the model, not the input |
 | `fallback_rate` | the model is extrapolating a lot | the bank is far outside normal ranges |
 | `panel_revisions` | past PDs changed since last run | expected after a vendor correction; check `pull_diff` for the cause |
-| `issuance_bs_lag` | bank issued shares; its liabilities are still last quarter's | not a data problem. See below |
+| `issuance_bs_lag` | bank issued shares; its liabilities are still last quarter's | not a data problem. If it was an acquisition it can be corrected — see below |
 | `group_composition` | a sector index gained or lost a bank | not a data problem. See below |
 
 ### About `issuance_bs_lag`
@@ -130,21 +130,63 @@ For those weeks the PD is computed from **new equity over old liabilities**, so
 it comes out **too low**. The bank looks safer than it is. That is the direction
 that matters — nobody double-checks a number that looks fine.
 
-Nothing is broken and nothing needs fixing. The correct interim liability figure
-does not exist anywhere the pipeline can reach. What you do:
+Nothing is broken. What you do depends on **why** the share count moved:
+
+**If it was an acquisition — fix it.** Add a line to `mergers.txt` and re-run
+`update`. The panel will add the target's own last-filed liabilities for exactly
+those weeks, the PD stops being understated, and the flag goes away on its own.
+See "Adding a merger" below.
+
+**If it was a capital raise — there is nothing to add.** No target means no
+liabilities to bridge, and the correct interim figure does not exist anywhere
+the pipeline can reach. So:
 
 - Do not cite that bank's PD for those weeks without saying it is understated.
 - The `equity_ratio` column tells you how much the equity base grew (1.67 = up
   67%). Bigger ratio, bigger the understatement.
-- The flag clears by itself when the next quarterly filing lands. You do not
-  have to do anything to make that happen.
-- Ack it with the deal name once you have confirmed what it was:
+- The flag clears by itself when the next quarterly filing lands.
+- Ack it once you have confirmed what it was:
 
 ```bash
 PYTHONPATH=. "C:/envs/bank-pd-venv/Scripts/python.exe" -m lfinp.cli ack \
-  --check issuance_bs_lag --rssd 2277860 --from 2025-05-30 --to 2025-06-27 \
-  --verdict accepted --note "Discover close 2025-05-18; Q2 Y-9C lands 2025-07-04"
+  --check issuance_bs_lag --rssd 1073757 --from 2017-09-01 --to 2017-09-29 \
+  --verdict accepted --note "Berkshire warrant exercise; no target to bridge"
 ```
+
+### Adding a merger
+
+One line in `mergers.txt`, then `update`:
+
+```
+<acquirer_rssd>  <target_rssd>  close=YYYY-MM-DD  [liab=<thousands USD>]  # names
+```
+
+Use `close=` for the **completion** date, not the announcement. `target_rssd` is
+the acquired holding company in the Y-9C panel; if it files no Y-9C — a broker,
+an asset manager, a bank with no holding company — put `0` and give `liab=`
+explicitly, with a comment saying where the figure came from.
+
+The build **aborts** rather than half-working if a line cannot be resolved:
+
+- `no target liabilities` — the target has no Y-9C filing on or before the
+  close. Add an explicit `liab=`.
+- `no share-count change near close` — the acquirer's shares never re-based
+  anywhere near that date. Either `close=` is wrong, or it was a cash deal,
+  which has no equity re-base and therefore nothing to correct. Remove it.
+
+Then confirm the line is sane before trusting it:
+
+```bash
+PYTHONPATH=. "C:/envs/bank-pd-venv/Scripts/python.exe" -m pytest \
+  tests/test_merger_bridge.py -q
+```
+
+That compares every line against what the acquirer actually filed the following
+quarter. A wrong RSSD or date shows up there as a large error rather than as a
+quietly wrong PD.
+
+Expect `panel_revisions` to fire on the next run. That is correct — the bridged
+weeks *should* revise, upward.
 
 Rows with `scope = group` are the same event seen in a sector index; their
 `rssd` is the group's negative id and `cap_share` is how much of that sector the

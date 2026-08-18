@@ -19,6 +19,24 @@ from . import config
 from .compute_merton_dtd import compute_merton_dtd
 
 
+def _inputs_match_sql(panel_alias: str, input_alias: str) -> str:
+    """SQL: the stored panel row was computed from the inputs present now.
+
+    Compared on the four kernel inputs the panel carries back (total_liab,
+    market_cap_raw, sE, r) plus the derived E_scaled. Relative tolerance,
+    because these round-trip through the CSV the kernel reads; PANEL_REVISION_TOL
+    is the same bar panel_revisions uses to call a PD changed."""
+    tol = config.PANEL_REVISION_TOL
+    pairs = [("total_liab", "total_liab"), ("market_cap_raw", "market_cap"),
+             ("sE", "sE"), ("r", "r"), ("E_scaled", "E_scaled")]
+    return " AND ".join(
+        f"(({panel_alias}.{p} IS NULL AND {input_alias}.{i} IS NULL) OR "
+        f" abs({panel_alias}.{p} - {input_alias}.{i}) <= "
+        f" {tol} * greatest(abs({input_alias}.{i}), 1.0))"
+        for p, i in pairs
+    )
+
+
 def assemble_inputs(
     conn: duckdb.DuckDBPyConnection,
     *,
@@ -29,8 +47,16 @@ def assemble_inputs(
     exclude_existing: bool = True,
 ) -> pd.DataFrame:
     """Compute-ready rows from pd_input (strict kernel filter: sE,
-    market_cap>0, total_liab>0, r all present). exclude_existing drops
-    (week_date, permco) already in pd_panel — incremental compute."""
+    market_cap>0, total_liab>0, r all present).
+
+    exclude_existing drops (week_date, permco) already in pd_panel — but only
+    when the stored row was computed from the inputs pd_input holds *now*. A
+    week whose inputs changed is not "already computed", it is stale, and
+    skipping it leaves pd_panel silently disagreeing with the panel it claims
+    to summarise. That is not hypothetical: adding a line to mergers.txt
+    rewrites total_liab for historical weeks that sit far outside the rolling
+    recompute window, and the first live merger backfill left 75 of 96 bridged
+    weeks carrying pre-bridge PDs."""
     wheres = [
         "sE IS NOT NULL",
         "market_cap IS NOT NULL",
@@ -53,7 +79,11 @@ def assemble_inputs(
 
     where_sql = "WHERE " + " AND ".join(wheres)
     excl_sql = (
-        "AND (week_date, permco) NOT IN (SELECT week_date, permco FROM pd_panel)"
+        f"""AND NOT EXISTS (
+              SELECT 1 FROM pd_panel p
+              WHERE p.week_date = i.week_date AND p.permco = i.permco
+                AND {_inputs_match_sql('p', 'i')}
+            )"""
         if exclude_existing else ""
     )
     sql = f"""
@@ -65,7 +95,7 @@ def assemble_inputs(
       market_cap AS market_cap_raw,
       total_liab,
       E_scaled AS E
-    FROM pd_input
+    FROM pd_input i
     {where_sql}
     {excl_sql}
     ORDER BY permco, week_date

@@ -69,6 +69,18 @@ then re-run `lfinp init` — CRSP is watermarked, Yahoo pulls new live banks,
 compute fills missing rows. RSSD→permco resolution goes through the link
 table and refuses missing/ambiguous mappings.
 
+## Mergers
+
+`mergers.txt` drives the pro-forma liability bridge: between a closing and
+the acquirer's next Y-9C, market cap is the combined company while
+`total_liab` is the acquirer alone, so the PD reads low. Two clocks, and
+both are tested — liabilities enter on `close=`, equity enters on the day
+the share count actually re-bases (detected from the data, **not** assumed
+from `close=`; CRSP lags the legal close, sometimes past the next filing).
+An unresolvable line aborts the build. Every line is machine-checked
+against the acquirer's next filing by `tests/test_merger_bridge.py` — run
+it after editing. Cash deals and capital raises do not belong in the file.
+
 ## External sources (read-only)
 
 Identical to bank-pd: `C:\empirical-data-construction\...` (Y-9C view
