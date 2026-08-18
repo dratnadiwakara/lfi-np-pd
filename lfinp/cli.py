@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
@@ -334,6 +335,30 @@ def cmd_update(args) -> int:
         conn.close()
 
 
+def _print_dashboard_status(conn) -> None:
+    """One line on the Shiny feed. The export is manual, so the failure mode is
+    forgetting it: the public chart silently keeps showing last month's panel.
+    This makes that visible next to the tables it is derived from."""
+    meta = config.dashboard_dir() / "meta.parquet"
+    if not meta.exists():
+        print(f"  {'dashboard':<12} not exported yet "
+              "(lfinp export-dashboard)")
+        return
+    try:
+        built_at, wk = conn.execute(
+            f"SELECT built_at, week_max FROM read_parquet('{meta.as_posix()}')"
+        ).fetchone()
+        panel_max = conn.execute(
+            "SELECT MAX(week_date) FROM pd_panel"
+        ).fetchone()[0]
+    except Exception as exc:  # noqa: BLE001
+        print(f"  {'dashboard':<12} unreadable: {exc}")
+        return
+    mark = "" if panel_max is None or wk >= panel_max else \
+        f"   STALE (panel has {panel_max})"
+    print(f"  {'dashboard':<12} latest {wk}   built {str(built_at)[:16]}{mark}")
+
+
 def cmd_status(args) -> int:
     conn = get_connection(read_only=True)
     try:
@@ -355,6 +380,7 @@ def cmd_status(args) -> int:
                   f"{snaps[-1].stem.removeprefix('pd_panel_')}   files {len(snaps)}")
         else:
             print(f"  {'snapshots':<12} none yet")
+        _print_dashboard_status(conn)
         print("\nPer-bank pd_panel tail:")
         df = conn.execute(
             """
@@ -514,6 +540,35 @@ def cmd_ack(args) -> int:
         conn.close()
 
 
+def cmd_export_dashboard(args) -> int:
+    """Rebuild the parquet feed the Shiny app reads (shiny/data/).
+
+    Read-only on the store: DuckDB is single-writer, so a dashboard refresh
+    must never be able to block a weekly run. Deliberately not called from
+    update - publishing is a human decision, and nothing new should be able to
+    fail a 20-minute run."""
+    from . import dashboard_export
+
+    conn = get_connection(read_only=True)
+    try:
+        res = dashboard_export.export_dashboard(
+            conn,
+            Path(args.out) if args.out else None,
+            min_banks=args.min_banks,
+        )
+        _log(f"dashboard: {res.summary()}")
+        for name in dashboard_export.FILES:
+            p = res.paths[name]
+            _log(f"  {p.name:<18} {res.rows[name]:>7,} rows  "
+                 f"{p.stat().st_size / 1024:>7.1f} KB")
+        _log(f"wrote to {res.out_dir}")
+        _log("review locally, then commit shiny/data and deploy:")
+        _log("  shiny::runApp('shiny', port = 4500, launch.browser = TRUE)")
+        return 0
+    finally:
+        conn.close()
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -552,6 +607,14 @@ def main() -> int:
     sp.add_argument("--years", type=float,
                     help="look back N years (default: 430 days rolling era)")
     sp.set_defaults(func=cmd_checks)
+
+    sp = sub.add_parser("export-dashboard",
+                        help="rebuild shiny/data/*.parquet for the Shiny app")
+    sp.add_argument("--out", help="output dir (default shiny/data)")
+    sp.add_argument("--min-banks", type=int, default=None,
+                    help="drop mean-PD weeks thinner than this "
+                         f"(default {config.DASHBOARD_MIN_BANKS})")
+    sp.set_defaults(func=cmd_export_dashboard)
 
     sp = sub.add_parser("ack", help="mark reviewed flags as explained")
     sp.add_argument("--check", required=True,

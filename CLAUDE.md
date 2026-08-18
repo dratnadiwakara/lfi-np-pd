@@ -22,6 +22,19 @@ PYTHONPATH=. "C:/envs/bank-pd-venv/Scripts/python.exe" -m lfinp.cli checks --str
 PYTHONPATH=. "C:/envs/bank-pd-venv/Scripts/python.exe" -m pytest tests -q
 ```
 
+## Scratch work goes in `.scratchpad/`
+
+**All exploratory and temporary work happens in `.scratchpad/` unless I say
+otherwise.** Diagnostic scripts, one-off queries, plots, notebooks, sample
+extracts, draft implementations -- all of it lands there, not at the repo
+root and not inside `lfinp/`. The folder is gitignored, so nothing in it
+reaches a commit.
+
+The main pipeline (`lfinp/`, `tests/`, `banks.txt`, `mergers.txt`, the docs)
+stays untouched until I have looked at the scratch work and am happy with it.
+**I will say explicitly when to integrate.** Do not fold scratch work into the
+pipeline on your own initiative, however finished it looks.
+
 ## Invariants — do not weaken (tests enforce them)
 
 1. **`retx` is a within-pull price return.** Never derived from market cap
@@ -61,6 +74,34 @@ PYTHONPATH=. "C:/envs/bank-pd-venv/Scripts/python.exe" -m pytest tests -q
 - Compute is Delaunay-bound: ~15–20 min per run regardless of row count.
 - Real market moves can exceed 10% daily (Apr 2025 tariff days hit 14.8% on
   COF) — don't tighten plausibility thresholds below that.
+
+## Dashboard (`shiny/`)
+
+R Shiny app for shinyapps.io, fed by `lfinp export-dashboard` ->
+`lfinp/dashboard_export.py` -> four parquets in `shiny/data/`. Rules:
+
+- The app **never opens the DuckDB store**. Parquet only: DuckDB is
+  single-writer and a reader would block the weekly run.
+- **`permco` is the series key, not `rssd`.** Three banks change RSSD
+  mid-history; an rssd key splits them silently.
+- **No vendor levels in the feed** (`total_liab`, `market_cap_raw`, `sE`, `r`,
+  fallback flags). Derived PDs only.
+- `shiny/data/*.parquet` **is committed** — rsconnect uploads from disk. The
+  root `.gitignore` therefore anchors `/data/`; a bare `data/` would swallow it.
+- The export is manual and read-only, never wired into `update`. `status`
+  prints a `dashboard` line and marks it `STALE` when the feed is behind.
+
+Deploy target: **shinyapps.io account `dimuthu-r`**, app name `lfi-np-pd` ->
+`https://dimuthu-r.shinyapps.io/lfi-np-pd/`. Publish with
+`source("shiny/deploy.R")` from the repo root.
+
+The account token and secret are **not in this repo**. `rsconnect` stores them
+under `%APPDATA%/R/config/R/rsconnect/` once `rsconnect::setAccountInfo()` has
+been run; `rsconnect/` is gitignored here for the same reason. Never paste the
+token or secret into a tracked file - CLAUDE.md, README.md and deploy.R are all
+committed and pushed to GitHub. If the credential is ever needed again, take it
+from shinyapps.io (avatar -> Tokens -> Show) or add it to the existing secrets
+store at `C:\key-variables\key-variables.yaml` alongside the WRDS and FRED keys.
 
 ## Scope changes
 

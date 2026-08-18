@@ -162,6 +162,13 @@ CRSP_TO_YF_ALIASES: dict[str, str] = {
 
 Y9C_STALE_DAYS = int(os.getenv("LFINP_Y9C_STALE_DAYS", "120"))
 
+# -- Dashboard export -------------------------------------------------------------
+
+# Weeks with fewer than this many banks are dropped from the cross-sectional
+# mean. The panel starts thin in 1986 and grows; an "average bank" computed off
+# two or three names is a composition artifact, not a market reading.
+DASHBOARD_MIN_BANKS = int(os.getenv("LFINP_DASHBOARD_MIN_BANKS", "5"))
+
 # -- DuckDB tuning ----------------------------------------------------------------
 
 DUCKDB_THREADS = 4
@@ -182,6 +189,16 @@ def snapshot_dir() -> Path:
     can be explained (pull_diff) but the previously-published value cannot be
     recovered from the store. These files are that record."""
     p = DATA_DIR / "snapshots"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def dashboard_dir() -> Path:
+    """Where the Shiny app's parquet feed lives. Unlike snapshot_dir(), this is
+    fully rebuildable published output: `lfinp export-dashboard` regenerates it
+    from the store at any time. Committed to git because rsconnect uploads the
+    app directory from disk, so a gitignored feed deploys empty from a clone."""
+    p = Path(os.getenv("LFINP_DASHBOARD_DIR", str(LFINP_ROOT / "shiny" / "data")))
     p.mkdir(parents=True, exist_ok=True)
     return p
 

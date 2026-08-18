@@ -37,6 +37,7 @@ Five things to look at:
 | `pd_panel latest` | last Friday |
 | `group_panel latest` | last Friday |
 | `snapshots latest` | today, files count went up by 1 |
+| `dashboard latest` | last Friday once you publish (see below); `STALE` until then |
 | check results | all `OK`, or flags you have reviewed |
 
 If `update` printed `FLAG` lines, read the next section. If it exited
@@ -400,6 +401,34 @@ PYTHONPATH=. "C:/envs/bank-pd-venv/Scripts/python.exe" -m lfinp.cli init
 ~45 minutes. Existing banks are not re-downloaded from CRSP, but the Yahoo
 era is re-pulled — so take a snapshot first if anyone has cited recent
 numbers.
+
+---
+
+## Publishing the dashboard
+
+Only after `update` finished clean and the flags are reviewed. Nothing here is
+automatic — the weekly run does not touch the dashboard, so a bad week never
+reaches a public URL on its own.
+
+```bash
+PYTHONPATH=. "C:/envs/bank-pd-venv/Scripts/python.exe" -m lfinp.cli export-dashboard
+```
+
+Rebuilds `shiny/data/` (four parquet files, ~660 KB). Read-only on the store,
+so it is safe to run at any time and cannot block a run.
+
+Then look at it before anyone else does:
+
+```r
+shiny::runApp("shiny", port = 4500, launch.browser = TRUE)
+source("shiny/deploy.R")     # publishes to shinyapps.io
+```
+
+Commit `shiny/data/` when you deploy — rsconnect uploads the folder from disk,
+so a clone without the parquets deploys an app with no data.
+
+If you skip this step, nothing breaks: `lfinp status` shows the `dashboard`
+line as `STALE` and the live app keeps serving the previous week.
 
 ---
 

@@ -304,6 +304,7 @@ PYTHONPATH=. C:/envs/bank-pd-venv/Scripts/python.exe -m lfinp.cli update   # wee
 PYTHONPATH=. C:/envs/bank-pd-venv/Scripts/python.exe -m lfinp.cli status   # read-only freshness + tails + last checks
 PYTHONPATH=. C:/envs/bank-pd-venv/Scripts/python.exe -m lfinp.cli checks   # read-only diagnostics (--strict, --all)
 PYTHONPATH=. C:/envs/bank-pd-venv/Scripts/python.exe -m lfinp.cli ack ...  # suppress a reviewed flag
+PYTHONPATH=. C:/envs/bank-pd-venv/Scripts/python.exe -m lfinp.cli export-dashboard  # rebuild the Shiny feed
 PYTHONPATH=. C:/envs/bank-pd-venv/Scripts/python.exe -m pytest tests -q    # regression tests (frozen fixtures)
 ```
 
@@ -313,6 +314,37 @@ flags something, without needing to understand this file.
 `update` exits non-zero on any gate failure and inserts nothing for the
 failing scope. Compute is Delaunay-bound: ~15–20 min wall regardless of row
 count.
+
+## Dashboard
+
+`shiny/` is an R Shiny app (shiny + nanoparquet + dplyr + plotly + DT) for
+shinyapps.io. It reads four small parquet files and never opens the DuckDB
+store — DuckDB is single-writer, so a reader there could block the weekly run,
+and the store is not deployed anyway.
+
+```bash
+PYTHONPATH=. C:/envs/bank-pd-venv/Scripts/python.exe -m lfinp.cli export-dashboard
+```
+
+writes `shiny/data/`: `pd_panel.parquet` (week_date, permco, np_PD,
+merton_PD, bs_bridged), `banks.parquet` (25 rows: permco, rssd, name, ticker,
+grp, dead), `mean_pd.parquet` (equal-weight cross-sectional mean plus the bank
+count behind each week), and `meta.parquet` (build stamp, printed in the app
+footer). ~660 KB total.
+
+Two decisions worth knowing:
+
+- **`permco` is the series key, not `rssd`.** Regions, BNY Mellon and KeyCorp
+  each carry two RSSDs across history; keyed on rssd they render as two
+  half-series with a gap and no error. `tests/test_dashboard_export.py` pins
+  this.
+- **No vendor levels ship.** `total_liab`, `market_cap_raw`, `sE`, `r` and the
+  fallback flags stay out of the public bundle; it carries derived PDs only.
+
+The export is manual by design — publishing is a human decision, and nothing
+new should be able to fail a 20-minute run. `lfinp status` prints a
+`dashboard` line and marks it `STALE` when the panel has moved past the feed.
+Deploy steps are in [shiny/README.md](shiny/README.md).
 
 ## Widening the scope
 

@@ -1,7 +1,13 @@
-# Local store (rebuildable: lfinp init)
-data/
+# Local store (rebuildable: lfinp init). Anchored with a leading slash: a bare
+# "data/" matches at any depth and would swallow shiny/data/, which IS committed
+# (rsconnect uploads the app directory from disk, so a gitignored feed deploys
+# empty from a fresh clone).
+/data/
 *.duckdb
 *.duckdb.wal
+
+# shinyapps.io deploy state - contains the account token
+rsconnect/
 
 # Large binary input - 30MB NP value surface, not source.
 # Obtain by copying from the bank-pd repo (see README "Setup").
