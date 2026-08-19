@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS bank_group (
   grp     TEXT,
   permco  INTEGER,             -- resolved at sync time; NULL if link lookup failed
   dead    BOOLEAN,
+  nogroup BOOLEAN,             -- excluded from group indices and dashboard mean
   name    TEXT,
   synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -329,6 +330,7 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
     # bank_group is derived, but dropping it here would empty it for read-only
     # commands until the next update, so add the column in place instead.
     conn.execute("ALTER TABLE bank_group ADD COLUMN IF NOT EXISTS permco INTEGER")
+    conn.execute("ALTER TABLE bank_group ADD COLUMN IF NOT EXISTS nogroup BOOLEAN")
     # Same reason: pd_input predates the merger bridge in existing stores, and
     # it is rebuilt wholesale every run, so widening in place is enough.
     conn.execute(
@@ -352,8 +354,10 @@ def sync_bank_groups(
     pm = permco_map or {}
     conn.execute("DELETE FROM bank_group")
     conn.executemany(
-        "INSERT INTO bank_group (rssd, grp, permco, dead, name) VALUES (?, ?, ?, ?, ?)",
-        [(b.rssd, b.group, pm.get(b.rssd), b.dead, b.comment) for b in banks],
+        "INSERT INTO bank_group (rssd, grp, permco, dead, nogroup, name)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        [(b.rssd, b.group, pm.get(b.rssd), b.dead, b.nogroup, b.comment)
+         for b in banks],
     )
     return len(banks)
 

@@ -87,7 +87,8 @@ WITH latest_tick AS (
 )
 SELECT bg.permco, bg.rssd,
        COALESCE(bg.name, t.comnam) AS name,
-       t.ticker, bg.grp, bg.dead
+       t.ticker, bg.grp, bg.dead,
+       COALESCE(bg.nogroup, FALSE) AS nogroup
 FROM bank_group bg
 LEFT JOIN latest_tick t ON t.permco = bg.permco AND t.rn = 1
 WHERE bg.permco IN (SELECT DISTINCT permco FROM pd_panel)
@@ -100,6 +101,10 @@ SELECT week_date,
        AVG(np_PD)     AS np_PD,
        AVG(merton_PD) AS merton_PD
 FROM pd_panel
+WHERE permco NOT IN (
+  SELECT permco FROM bank_group
+  WHERE COALESCE(nogroup, FALSE) AND permco IS NOT NULL
+)
 GROUP BY week_date
 HAVING COUNT(np_PD) >= {min_banks}
 ORDER BY week_date

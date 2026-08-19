@@ -10,7 +10,9 @@
 #                                assets serviced, credit risk is incidental
 #                   lender       balance-sheet credit risk is the business:
 #                                regionals, card and auto monolines
-# Edit this file to widen the scope, then run:  lfinp init --backfill-new
+#   nogroup     = bank-level PDs only; excluded from group indices and the
+#                 dashboard mean so adding it leaves published history alone.
+# Edit this file to widen the scope, then run:  lfinp init
 # Names are informational (validated against crsp_link at runtime).
 1037003  group=lender       # M & T BANK CORP
 1275216  group=lender       # AMERICAN EXPRESS CO
@@ -37,3 +39,17 @@
 1070345  group=lender       # FIFTH THIRD BANCORP
 1120754  group=moneycenter  # WELLS FARGO & CO
 1031449  dead group=lender  # SVB FINANCIAL GROUP (failed 2023-03-10; historical compute only)
+# Failed banks added for the supervisor-flag backtest. All dead+nogroup:
+# bank-level PDs only, no effect on group indices or the dashboard mean.
+1073551  dead nogroup group=moneycenter  # WACHOVIA CORP (forced sale to WFC 2008-10)
+1069125  dead nogroup group=lender       # NATIONAL CITY CORP (forced sale to PNC 2008-10)
+1080465  dead nogroup group=lender       # COLONIAL BANCGROUP (failed 2009-08-14)
+1200393  dead nogroup group=lender       # CORUS BANKSHARES (failed 2009-09-11)
+2694814  dead nogroup group=lender       # UCBH HOLDINGS (failed 2009-11-06)
+2801546  dead nogroup group=lender       # W HOLDING CO / WESTERNBANK PR (failed 2010-04-30)
+2184164  dead nogroup group=lender       # DORAL FINANCIAL CORP (failed 2015-02-27)
+3485541  dead nogroup group=lender       # FIRST NBC BANK HOLDING (failed 2017-04-28)
+3695667  dead nogroup group=lender       # SILVERGATE CAPITAL (wound down 2023-03-08)
+2942690  dead nogroup group=lender       # SIGNATURE BANK (failed 2023-03-12)
+4114567  dead nogroup group=lender       # FIRST REPUBLIC BANK (failed 2023-05-01)
+1398807  dead nogroup group=lender       # REPUBLIC FIRST BANCORP (failed 2024-04-26)

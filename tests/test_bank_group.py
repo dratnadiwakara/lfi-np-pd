@@ -23,7 +23,7 @@ def _write(tmp_path, body):
 class TestParse:
     def test_every_real_bank_is_classified(self):
         banks = config.load_banks()
-        assert len(banks) == 25
+        assert len(banks) == 37
         assert all(b.group in config.BANK_GROUPS for b in banks), \
             "unclassified bank would vanish from group-wise cuts"
 
@@ -43,8 +43,15 @@ class TestParse:
         assert g[1039502] == "moneycenter" and g[1073757] == "moneycenter"
 
     def test_dead_bank_keeps_its_group(self):
-        svb = [b for b in config.load_banks() if b.dead]
-        assert len(svb) == 1 and svb[0].group == "lender"
+        svb = [b for b in config.load_banks() if b.rssd == 1031449]
+        assert len(svb) == 1 and svb[0].dead and svb[0].group == "lender"
+        # SVB stays in published group history; the other failed banks do not
+        assert not svb[0].nogroup
+
+    def test_nogroup_banks_still_carry_a_group_label(self):
+        for b in config.load_banks():
+            if b.nogroup:
+                assert b.group in config.BANK_GROUPS
 
     def test_missing_group_is_an_error(self, tmp_path):
         with pytest.raises(ValueError, match="Missing group"):

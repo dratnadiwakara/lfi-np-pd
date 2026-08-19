@@ -1,7 +1,8 @@
 # lfi-np-pd — agent context
 
 Minimal, accuracy-first weekly NP (Nagel–Purnanandam 2019) + Merton PD for
-the banks in `banks.txt` (24 LFI BHCs + SVB). Full rationale and gate table
+the banks in `banks.txt` (24 LFI BHCs + SVB + 12 `dead nogroup` failed banks
+kept out of group indices and the dashboard mean). Full rationale and gate table
 in README.md; chronological decisions in NOTES.md. This repo replaces the
 LFI use-case of the sibling `bank-pd` repo, which stays untouched.
 

@@ -931,6 +931,7 @@ def check_issuance_bs_lag(
                      MAX(s.issue_date) AS issue_date, MAX(s.ratio) AS equity_ratio
               FROM pd_input i
               JOIN bank_group bg ON bg.rssd = i.rssd
+                                AND NOT COALESCE(bg.nogroup, FALSE)
               JOIN issues s ON s.permco = i.permco
                            AND s.issue_date >  i.bs_quarter_end
                            AND s.issue_date <= i.week_date

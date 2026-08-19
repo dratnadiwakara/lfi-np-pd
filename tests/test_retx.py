@@ -290,10 +290,16 @@ class TestSharesGrounding:
 class TestBanksFile:
     def test_load_banks(self):
         banks = config.load_banks()
-        assert len(banks) == 25
-        dead = [b.rssd for b in banks if b.dead]
-        assert dead == [1031449], "SVB must be the only dead bank"
-        assert len({b.rssd for b in banks}) == 25
+        assert len(banks) == 37
+        dead = {b.rssd for b in banks if b.dead}
+        assert 1031449 in dead, "SVB must be dead"
+        assert len(dead) == 13, "SVB plus the 12 failed backtest banks"
+        # every failed bank except SVB is nogroup (published history frozen)
+        nogroup = {b.rssd for b in banks if b.nogroup}
+        assert nogroup == dead - {1031449}
+        assert not any(b.nogroup and not b.dead for b in banks), \
+            "nogroup is only for dead banks"
+        assert len({b.rssd for b in banks}) == 37
         assert 1073757 in {b.rssd for b in banks}  # BAC
 
 

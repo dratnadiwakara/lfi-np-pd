@@ -65,7 +65,7 @@ def build_group_daily(conn: duckdb.DuckDBPyConnection) -> int:
              LAG(e.market_cap) OVER (PARTITION BY e.permco ORDER BY e.date) AS w
       FROM equity_daily e
       JOIN bank_group bg ON bg.permco = e.permco
-      WHERE bg.grp IS NOT NULL
+      WHERE bg.grp IS NOT NULL AND NOT COALESCE(bg.nogroup, FALSE)
     ),
     caps AS (
       SELECT grp, date, SUM(market_cap) AS market_cap, COUNT(*) AS n_members
@@ -155,7 +155,7 @@ def build_group_input(
                / NULLIF(SUM(i.market_cap), 0)                         AS bs_cap_coverage
       FROM pd_input i
       JOIN bank_group bg ON bg.rssd = i.rssd
-      WHERE bg.grp IS NOT NULL
+      WHERE bg.grp IS NOT NULL AND NOT COALESCE(bg.nogroup, FALSE)
       GROUP BY bg.grp, i.week_date
     ),
     joined AS (

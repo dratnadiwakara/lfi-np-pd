@@ -420,3 +420,20 @@ weeks and the size of the equity move; the judgement stays with the reader.
 Live store, 2024+: 4 events - COF/Discover (1.67x), FITB 2026-02-04 (1.64x),
 HBAN 2026-02-03 (1.29x), FCNCA 2026-01-02 (1.12x), KEY 2025-01-31 (1.12x).
 All plausible corporate actions; none acked yet.
+
+## 2026-08-19 - 12 failed banks added as dead+nogroup
+
+Supervisor-flag backtest needed failed banks beyond SVB. Added Wachovia,
+National City, Colonial, Corus, UCBH, W Holding, Doral, First NBC,
+Silvergate, Signature, First Republic, Republic First - all `dead nogroup`.
+New `nogroup` flag (config/db/groups/checks/dashboard_export): bank-level
+PDs only, excluded from group indices and the dashboard mean, so published
+group_panel and mean_pd history is unchanged (verified: n_banks identical
+on all 2,081 mean weeks after init). Signature and First Republic have no
+BHC and exercise the Call Report fallback (bs_source='call_report') for the
+first time in production. OTS thrifts (WaMu, IndyMac, Downey, Guaranty,
+BankUnited, Countrywide) are NOT addable: no Y-9C, no crsp_frb_link rows.
+Pre-1986 failures (Continental Illinois) out of reach (START_DATE).
+fallback_rate acked once per dead bank (final-year sE is permanent by
+construction). Pre-init store snapshot kept in .scratchpad temporarily.
+SVB deliberately stays plain `dead` (in groups/mean, as before).

@@ -238,10 +238,14 @@ class Bank:
     dead: bool          # True = compute historical PDs only, never pull Yahoo
     comment: str
     group: Optional[str] = None      # one of BANK_GROUPS; None only via env override
+    nogroup: bool = False   # True = bank-level PDs only; excluded from group
+                            # indices and the dashboard mean so adding it does
+                            # not rewrite published group/mean history
 
 
 def load_banks(path: Optional[Path] = None) -> list[Bank]:
-    """Parse banks.txt: one RSSD per line, flags 'dead' / 'group=<g>', '#' comments.
+    """Parse banks.txt: one RSSD per line, flags 'dead' / 'nogroup' /
+    'group=<g>', '#' comments.
 
     group is mandatory in the file — an unclassified bank would silently fall
     out of every group-wise cut. Env LFINP_RSSDS (comma-separated) overrides the
@@ -268,7 +272,7 @@ def load_banks(path: Optional[Path] = None) -> list[Bank]:
             if f.startswith("group="):
                 group = f.split("=", 1)[1]
                 flags.discard(f)
-        unknown = flags - {"dead"}
+        unknown = flags - {"dead", "nogroup"}
         if unknown:
             raise ValueError(f"Unknown flag(s) {unknown} on line: {raw!r}")
         if group is None:
@@ -281,7 +285,8 @@ def load_banks(path: Optional[Path] = None) -> list[Bank]:
             raise ValueError(f"Duplicate RSSD {rssd} in {p}")
         seen.add(rssd)
         banks.append(Bank(rssd=rssd, dead="dead" in flags,
-                          comment=comment.strip(), group=group))
+                          comment=comment.strip(), group=group,
+                          nogroup="nogroup" in flags))
     if not banks:
         raise ValueError(f"No banks parsed from {p}")
     return banks
