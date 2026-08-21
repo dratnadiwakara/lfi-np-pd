@@ -56,6 +56,24 @@ BANKS <- read_parquet(BANKS_PQ) |>
 WK_MIN <- min(PD_PANEL$week_date)
 WK_MAX <- max(PD_PANEL$week_date)
 
+# Last Friday of each completed calendar quarter, keyed to the 3-31 / 6-30 /
+# 9-30 / 12-31 quarter-end date. Quarters still in progress (calendar end
+# beyond WK_MAX) are excluded so a mid-quarter Friday never masquerades as a
+# quarter end.
+QE_LOOKUP <- local({
+  wk <- sort(unique(PD_PANEL$week_date))
+  yr <- as.integer(format(wk, "%Y"))
+  q  <- (as.integer(format(wk, "%m")) - 1L) %/% 3L + 1L
+  qe <- as.Date(sprintf("%d-%s", yr,
+                        c("03-31", "06-30", "09-30", "12-31")[q]))
+  df <- data.frame(week_date = wk, quarter_end = qe)
+  df <- df[df$quarter_end <= WK_MAX, ]
+  df |>
+    group_by(quarter_end) |>
+    slice_max(week_date, n = 1) |>
+    ungroup()
+})
+
 # Same 10 colors as the sibling bank-pd dashboard, so the two read alike.
 PALETTE <- c("#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e",
              "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#7f7f7f")
@@ -110,6 +128,9 @@ ui <- fluidPage(
                      start = WK_MIN, end = WK_MAX,
                      min = WK_MIN, max = WK_MAX, format = "yyyy-mm-dd"),
       tags$hr(),
+      radioButtons("dl_freq", "Download frequency",
+                   choices = c("Weekly" = "weekly", "Quarter-end" = "quarter"),
+                   selected = "weekly", inline = TRUE),
       downloadButton("download", "Download CSV", class = "btn-primary")
     ),
     mainPanel(
@@ -284,16 +305,28 @@ server <- function(input, output, session) {
   output$download <- downloadHandler(
     filename = function() {
       dr <- input$date_range
-      sprintf("lfi_np_pd_%s_%s_%dbanks.csv",
+      sprintf("lfi_np_pd_%s%s_%s_%dbanks.csv",
+              if (input$dl_freq == "quarter") "qend_" else "",
               format(dr[1], "%Y%m%d"), format(dr[2], "%Y%m%d"),
               length(input$banks))
     },
     content = function(file) {
       df <- selected_panel()
-      if (is.null(df)) df <- PD_PANEL[0, ]
-      out <- df |>
-        select(week_date, permco, rssd, name, ticker,
-               np_PD, merton_PD, bs_bridged)
+      if (is.null(df)) {
+        df <- PD_PANEL[0, ] |>
+          mutate(rssd = integer(), name = character(), ticker = character())
+      }
+      if (input$dl_freq == "quarter") {
+        out <- df |>
+          inner_join(QE_LOOKUP, by = "week_date") |>
+          select(quarter_end, permco, rssd, name, ticker,
+                 np_PD, merton_PD, bs_bridged) |>
+          arrange(permco, quarter_end)
+      } else {
+        out <- df |>
+          select(week_date, permco, rssd, name, ticker,
+                 np_PD, merton_PD, bs_bridged)
+      }
       write.csv(out, file, row.names = FALSE)
     }
   )
