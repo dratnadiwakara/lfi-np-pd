@@ -131,6 +131,10 @@ ui <- fluidPage(
       radioButtons("dl_freq", "Download frequency",
                    choices = c("Weekly" = "weekly", "Quarter-end" = "quarter"),
                    selected = "weekly", inline = TRUE),
+      radioButtons("dl_banks", "Download banks",
+                   choices = c("Plotted banks" = "plotted",
+                               "All non-failed banks" = "all"),
+                   selected = "plotted", inline = TRUE),
       downloadButton("download", "Download CSV", class = "btn-primary")
     ),
     mainPanel(
@@ -302,20 +306,37 @@ server <- function(input, output, session) {
             substr(META$built_at[1], 1, 10))
   })
 
+  # Panel to export: the plotted banks, or every non-failed bank
+  # (!dead & !nogroup) regardless of the plot selection.
+  download_panel <- function() {
+    if (input$dl_banks == "all") {
+      permcos <- BANKS |> filter(!dead, !nogroup) |> pull(permco)
+    } else {
+      permcos <- as.integer(input$banks)
+    }
+    dr <- input$date_range
+    PD_PANEL |>
+      filter(permco %in% permcos,
+             week_date >= dr[1], week_date <= dr[2]) |>
+      left_join(BANKS |> select(permco, name, ticker, rssd),
+                by = "permco") |>
+      arrange(permco, week_date)
+  }
+
   output$download <- downloadHandler(
     filename = function() {
       dr <- input$date_range
+      n <- if (input$dl_banks == "all") {
+        sum(!BANKS$dead & !BANKS$nogroup)
+      } else {
+        length(input$banks)
+      }
       sprintf("lfi_np_pd_%s%s_%s_%dbanks.csv",
               if (input$dl_freq == "quarter") "qend_" else "",
-              format(dr[1], "%Y%m%d"), format(dr[2], "%Y%m%d"),
-              length(input$banks))
+              format(dr[1], "%Y%m%d"), format(dr[2], "%Y%m%d"), n)
     },
     content = function(file) {
-      df <- selected_panel()
-      if (is.null(df)) {
-        df <- PD_PANEL[0, ] |>
-          mutate(rssd = integer(), name = character(), ticker = character())
-      }
+      df <- download_panel()
       if (input$dl_freq == "quarter") {
         out <- df |>
           inner_join(QE_LOOKUP, by = "week_date") |>
