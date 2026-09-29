@@ -306,11 +306,12 @@ server <- function(input, output, session) {
             substr(META$built_at[1], 1, 10))
   })
 
-  # Panel to export: the plotted banks, or every non-failed bank
-  # (!dead & !nogroup) regardless of the plot selection.
+  # Panel to export: the plotted banks, or every non-failed bank (!dead)
+  # regardless of the plot selection. nogroup only governs the group indices
+  # and the mean; the live regionals it marks belong in the download.
   download_panel <- function() {
     if (input$dl_banks == "all") {
-      permcos <- BANKS |> filter(!dead, !nogroup) |> pull(permco)
+      permcos <- BANKS |> filter(!dead) |> pull(permco)
     } else {
       permcos <- as.integer(input$banks)
     }
@@ -327,7 +328,7 @@ server <- function(input, output, session) {
     filename = function() {
       dr <- input$date_range
       n <- if (input$dl_banks == "all") {
-        sum(!BANKS$dead & !BANKS$nogroup)
+        sum(!BANKS$dead)
       } else {
         length(input$banks)
       }

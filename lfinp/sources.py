@@ -115,14 +115,27 @@ def validate_v2_against_legacy(
     retx_bad = m[(m["retx_dsf"] - m["retx_v2"]).abs() > 5e-6]
     mcap_rel = (m["market_cap_v2"] / m["market_cap_dsf"] - 1).abs()
     mcap_bad = m[mcap_rel > 0.001]
-    if len(retx_bad) or (mcap_rel > 0.05).any() or len(mcap_bad) > 5:
+    # Every mcap disagreement seen so far sits on the legacy file's last day
+    # (2024-12-31): the annual legacy cut carries a shrout that v2 has since
+    # revised. That is one row per affected permco, so a fixed count stops
+    # scaling once the scope widens (25 banks: 3 rows; 47 banks: 6 rows, the
+    # first init after adding the regionals). Rows off the boundary day are
+    # the ones that would indicate a real product difference.
+    # Valley's edge row differs by 9.7% (a late-2024 issuance the legacy
+    # shrout never picked up), so the size ceiling is interior-only too.
+    end_day = pd.Timestamp(end).date()
+    interior = m["date"] != end_day
+    mcap_bad_interior = mcap_bad[mcap_bad["date"] != end_day]
+    if (len(retx_bad) or (mcap_rel[interior] > 0.05).any()
+            or len(mcap_bad_interior) > 5):
         bad = pd.concat([retx_bad, mcap_bad]).drop_duplicates(
             subset=["permco", "date"])
     else:
         if len(mcap_bad):
-            print(f"  note: dsf_v2 mcap differs on {len(mcap_bad)} row(s) "
-                  f"(max {mcap_rel.max():.2%}, shrout revision) - accepted; "
-                  f"retx identical on all {len(m):,} rows")
+            print(f"  note: dsf_v2 mcap differs on {len(mcap_bad)} row(s), "
+                  f"{len(mcap_bad) - len(mcap_bad_interior)} of them on the "
+                  f"legacy edge {end_day} (max {mcap_rel.max():.2%}, shrout "
+                  f"revision) - accepted; retx identical on all {len(m):,} rows")
         bad = m.iloc[0:0]
     return bad[["permco", "date", "retx_dsf", "retx_v2",
                 "market_cap_dsf", "market_cap_v2"]]

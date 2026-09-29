@@ -59,3 +59,34 @@
 1068191  4105266  close=2025-10-20   # HBAN / Veritex Holdings  -0.8% (bridges no weeks: CRSP never picked up the new share count, so the equity re-base lands 2026-01-02, after the 2025-12-31 Y-9C already consolidated Veritex. Kept as documentation of the deal)
 1070345  1199844  close=2026-02-01   # FITB / Comerica  +0.8%
 1068191  0        close=2026-02-01 liab=47285383   # HBAN / Cadence Bank (a bank with no holding company, so it files a Call Report and not a Y-9C. Total liabilities at 2025-12-31)  -1.9%
+
+# Next-10 regionals (added 2026-09-29). Bridge error shown is the
+# tests/test_merger_bridge.py backtest at the time of adding.
+2349815  3280988  close=2015-06-30   # WAL / Bridge Capital Holdings  +10.3% (WAL grew ~10% organically that quarter)
+2734233  2344799  close=2014-01-17   # EWBC / MetroCorp Bancshares  -3.9%
+1098303  3059504  close=2012-09-15   # ONB / Indiana Community Bancorp  +3.3%
+1133437  1493560  close=2012-12-13   # SSB (then SCBT Financial) / Savannah Bancorp  +2.0%
+1133437  1890507  close=2013-07-26   # SSB (then SCBT Financial) / First Financial Holdings (Charleston SC; RSSD 1890507, the 2012-2013 filer)  +4.7%
+1098303  2745604  close=2014-04-25   # ONB / Tower Financial  -1.6%
+1098303  1135516  close=2014-07-31   # ONB / United Bancorp (Ann Arbor MI)  +1.3%
+1049828  1123193  close=2015-05-31   # UMBF / Marquette Financial Companies (Minneapolis; RSSD 1123193, not Marquette National of Chicago)  -1.8%
+1098303  2790967  close=2016-05-01   # ONB / Anchor BanCorp Wisconsin  -2.6%
+1133437  1938865  close=2017-01-03   # SSB / Southeastern Bank Financial (Augusta GA)  -1.5%
+1098303  1126475  close=2017-11-01   # ONB / Anchor Bancorp (St. Paul MN)  -2.0%
+1094640  4160939  close=2017-11-30   # FHN / Capital Bank Financial  -3.6%
+1133437  4210478  close=2017-11-30   # SSB / Park Sterling  +2.1%
+1098303  1123915  close=2018-11-01   # ONB / Klein Financial  +0.4%
+1133437  2868129  close=2020-06-07   # SSB / CenterState Bank Corp (merger of equals; South State's RSSD and permco continue)  -9.6%
+1094640  2291914  close=2020-07-01   # FHN / IBERIABANK Corp (RSSD 2291914, filed as ISB Financial in older raw rows)  -1.4%
+1145476  3083291  close=2022-02-01   # WBS / Sterling Bancorp NY (RSSD 3083291 = former Provident New York Bancorp; NOT 3852031, the Michigan Sterling)  -1.2%
+1133437  0        close=2022-03-01 liab=3446062   # SSB / Atlantic Capital Bancshares (stopped filing Y-9C at 2018-06-30 after falling below the threshold, so the lookup would be stale. Total liabilities at 2021-12-31 from its Q4 2021 results 8-K, exhibit 99.2)  -3.6%
+1098303  1208184  close=2022-02-15   # ONB / First Midwest Bancorp (merger of equals; Old National's RSSD and permco continue)  -0.3%
+1098303  4933272  close=2024-04-01   # ONB / CapStar Financial  -0.9%
+1133437  3140288  close=2025-01-01   # SSB / Independent Bank Group  -0.6%
+1049828  1206546  close=2025-01-31   # UMBF / Heartland Financial USA (RSSD 1206546, filed as Heartland Bancorp in raw)  -0.7%
+1098303  1020180  close=2025-05-01   # ONB / Bremer Financial  -0.7%
+1048773  2860431  close=2014-11-01   # VLY / 1st United Bancorp (Boca Raton FL; RSSD 2860431)  -2.1%
+1048773  2705943  close=2015-12-01   # VLY / CNLBancshares  -3.2%
+1048773  3536386  close=2018-01-01   # VLY / USAmeriBancorp  -1.6%
+1048773  2692892  close=2019-12-01   # VLY / Oritani Financial  +1.8%
+1048773  1245620  close=2022-04-01   # VLY / Bank Leumi Le-Israel Corporation (US holding company of Bank Leumi USA; files Y-9C)  -5.1%

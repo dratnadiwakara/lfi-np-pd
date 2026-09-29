@@ -174,15 +174,29 @@ def _rebuild_and_compute(
     _log(f"group_daily: {groups.build_group_daily(conn)} row(s)")
     _log(f"group_input: {groups.build_group_input(conn)} row(s)")
 
-    since = recompute_since.isoformat() if recompute_since else None
-    incremental = recompute_since is None
-    df = compute_mod.assemble_inputs(
-        conn, permco_filter=all_permcos,
-        week_date_min=since, exclude_existing=incremental,
-    )
-    df_g = groups.assemble_group_inputs(
-        conn, week_date_min=since, exclude_existing=incremental,
-    )
+    # Two compute sets, unioned. The staleness set is every week not yet in
+    # the panel, or in it with different inputs; that alone is the weekly
+    # path. A revision window (recompute_since) forces everything from that
+    # date regardless. The window must never REPLACE the staleness set: a
+    # bank added on a re-run whose CRSP rows arrive in two fetches (legacy,
+    # then v2 from 2025) sets recompute_since to 2025-01-02, and computing
+    # only that window left its whole pre-2025 history uncomputed, with no
+    # gate to notice - coverage looks at equity_daily, not pd_panel.
+    df = compute_mod.assemble_inputs(conn, permco_filter=all_permcos,
+                                     exclude_existing=True)
+    df_g = groups.assemble_group_inputs(conn, exclude_existing=True)
+    if recompute_since is not None:
+        since = recompute_since.isoformat()
+        df = pd.concat([df, compute_mod.assemble_inputs(
+            conn, permco_filter=all_permcos, week_date_min=since,
+            exclude_existing=False)], ignore_index=True)
+        if not df.empty:
+            df = df.drop_duplicates(subset=["permco", "week_date"])
+        df_g = pd.concat([df_g, groups.assemble_group_inputs(
+            conn, week_date_min=since, exclude_existing=False)],
+            ignore_index=True)
+        if not df_g.empty:
+            df_g = df_g.drop_duplicates(subset=["grp", "week_date"])
     if df.empty and df_g.empty:
         _log("compute: nothing to do")
         return 0
@@ -246,11 +260,21 @@ def cmd_init(args) -> int:
                     _log("dsf_v2 validated against legacy dsf (retx 1e-8, mcap 0.1%)")
         n, crsp_min = sources.fetch_crsp_daily(conn, wdb, all_permcos)
         _log(f"crsp_daily (legacy dsf): +{n} row(s)")
+        # v2 starts where the LEGACY file ends, not at the store's overall
+        # edge. On a re-run the store already holds v2 rows for the old banks,
+        # so the overall edge is past the legacy cut and a bank added since
+        # would silently get no v2 rows at all (a year-long CRSP gap that the
+        # Yahoo backfill does not cover). The per-permco watermark inside
+        # fetch_crsp_daily keeps the old banks' rows untouched.
+        legacy_edge = conn.execute(
+            "SELECT MAX(date) FROM crsp_daily WHERE src_table = 'dsf'"
+        ).fetchone()[0]
         edge = _crsp_edge(conn)
-        if v2max and edge and v2max > edge and bad is not None and not len(bad):
-            n, v2_min = sources.fetch_crsp_daily(conn, wdb, all_permcos,
-                                                 use_v2_after=edge.isoformat())
-            _log(f"crsp_daily (dsf_v2 past {edge}): +{n} row(s)")
+        if (v2max and legacy_edge and v2max > legacy_edge
+                and bad is not None and not len(bad)):
+            n, v2_min = sources.fetch_crsp_daily(
+                conn, wdb, all_permcos, use_v2_after=legacy_edge.isoformat())
+            _log(f"crsp_daily (dsf_v2 past {legacy_edge}): +{n} row(s)")
             if v2_min is not None and (crsp_min is None or v2_min < crsp_min):
                 crsp_min = v2_min
             edge = _crsp_edge(conn)

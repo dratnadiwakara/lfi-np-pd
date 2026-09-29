@@ -53,3 +53,22 @@
 2942690  dead nogroup group=lender       # SIGNATURE BANK (failed 2023-03-12)
 4114567  dead nogroup group=lender       # FIRST REPUBLIC BANK (failed 2023-05-01)
 1398807  dead nogroup group=lender       # REPUBLIC FIRST BANCORP (failed 2024-04-26)
+# Next-10 largest listed US banks by 2026-06-30 Y-9C assets, added 2026-09-29.
+# Webster was acquired by Banco Santander on 2026-08-20 (delisted, Yahoo history
+# gone), so it is dead and Valley National takes the tenth live slot.
+# Live (Yahoo-pulled) but nogroup: bank-level PDs only, so group_panel and
+# the dashboard mean stay as published. group=lender is a label only.
+# Excluded for now: Pinnacle/Synovus (new RSSD 6073350, no CRSP link row yet),
+# Flagstar/NYCB (holdco stopped filing Y-9C 2025-09-30, needs a link override
+# to bank RSSD 694904), Comerica (acquired by FITB 2026-02-01).
+2349815  nogroup group=lender  # WESTERN ALLIANCE BANCORP
+276579   nogroup group=lender  # ZIONS BANCORPORATION NA (RSSD 1027004 until 2018-09-30; Y-9C to 2018-06-30, Call Report after)
+1145476  dead nogroup group=lender  # WEBSTER FINANCIAL CORP (acquired by Santander 2026-08-20; CRSP history only)
+2734233  nogroup group=lender  # EAST WEST BANCORP INC
+1094640  nogroup group=lender  # FIRST HORIZON CORP
+1129382  nogroup group=lender  # POPULAR, INC.
+2260406  nogroup group=lender  # WINTRUST FINANCIAL CORP
+1098303  nogroup group=lender  # OLD NATIONAL BANCORP
+1049828  nogroup group=lender  # UMB FINANCIAL CORP
+1133437  nogroup group=lender  # SOUTH STATE CORP
+1048773  nogroup group=lender  # VALLEY NATIONAL BANCORP

@@ -421,6 +421,106 @@ Live store, 2024+: 4 events - COF/Discover (1.67x), FITB 2026-02-04 (1.64x),
 HBAN 2026-02-03 (1.29x), FCNCA 2026-01-02 (1.12x), KEY 2025-01-31 (1.12x).
 All plausible corporate actions; none acked yet.
 
+## 2026-09-29 - next-10 regionals added as live nogroup
+
+Scope widened from 37 to 48 lines: the ten largest listed US banks below the
+LFI set by 2026-06-30 Y-9C assets (Western Alliance, Zions, East West, First
+Horizon, Popular, Wintrust, Old National, UMB, South State, Valley National),
+plus Webster as `dead nogroup`. All live, all `nogroup`, so `group_panel` and
+the dashboard mean are byte-for-byte what they were; `group=lender` on those
+lines is a label only. `nogroup` had been dead-only until now and the tests
+pinned that; they now pin the exact live-nogroup set instead.
+
+### What the candidate list turned up
+
+- **Webster ranked 5th but no longer exists.** Banco Santander closed its
+  acquisition on 2026-08-20; Yahoo's WBS history is a single row. It stays as
+  `dead nogroup` (CRSP history through 2025-12-31) and Valley, 11th at 66bn,
+  takes the tenth live slot. Found by the Yahoo pull, not by the asset ranking:
+  the 2026-06-30 Y-9C is the last thing a bank files before it disappears.
+- **Pinnacle/Synovus (129bn) is not addable yet.** The 2026 merger created a
+  new top-tier RSSD 6073350 (Y-9C from 2026-03-31); both legacy RSSDs stop at
+  2025-12-31 and `crsp_frb_link` has no row for the new one, so
+  `permcos_for_rssds` refuses it. Needs a link override plus a Synovus bridge.
+- **Flagstar/NYCB (88bn) would go quietly stale.** The holding company stopped
+  filing Y-9C at 2025-09-30 (folded into Flagstar Bank NA, Call Report RSSD
+  694904) but the link still maps permco 12608 to 2132932, so the Y-9C ASOF
+  join would forward-fill the 2025-09-30 liabilities forever and the Call
+  Report fallback would never trigger. `bs_stale` flags it, nothing aborts.
+  Deferred until there is a link override.
+- **Zions is the case the link already handles.** Holding company 1027004
+  stopped filing at 2018-06-30; the link switches to bank RSSD 276579 at
+  2018-09-30, after which `bs_source` is `call_report`. banks.txt carries
+  276579 (the latest linked RSSD) and the ASOF link gives 1027004 for earlier
+  weeks, same mechanism as RF/BK/KEY.
+- Comerica (acquired by FITB 2026-02-01), the non-bank Y-9C filers (Ameriprise,
+  Raymond James, Stifel, SoFi) and the foreign IHCs are out.
+
+### Two init defects the wider scope exposed
+
+Both would have been invisible with 25 banks and both failed loudly.
+
+- **`validate_v2_against_legacy` did not scale.** It rejected v2 when more
+  than five (permco, date) rows disagreed on market cap. Every disagreement
+  ever seen sits on the legacy file's last day (2024-12-31: a shrout the
+  annual cut carried and v2 later revised), one row per affected bank, so the
+  count grows with the scope: 3 rows at 25 banks, 7 at 48. Valley's edge row
+  was also 9.7% out (a late-2024 issuance the legacy shrout missed), tripping
+  the 5% ceiling. Both tests now apply to interior rows only; retx must still
+  match on every row. First run rejected v2 for this reason and the new banks
+  got CRSP only to 2024-12-31.
+- **`init` started the v2 fetch at the store's overall edge.** On a re-run the
+  old banks already have v2 rows to 2025-12-31, so `use_v2_after` was set to
+  2025-12-31 and a bank added since got no 2025 CRSP rows at all: a year-long
+  gap between the legacy cut and the Yahoo window. Symptom: Old National, UMB
+  and South State (all with 2025 stock deals) failed `ground_shares_to_crsp`
+  because the anchor was a 2024-12-31 shrout. Now keyed off
+  `MAX(date) WHERE src_table='dsf'`; the per-permco watermark keeps the old
+  banks' rows untouched. Second run then fetched 2,750 v2 rows (11 x 250).
+
+### Mergers
+
+29 lines added to mergers.txt (WAL 1, EWBC 1, FHN 2, ONB 9, UMBF 2, SSB 7,
+VLY 5, plus Atlantic Capital), every one within the 15% backtest before the
+run; worst are WAL/Bridge Capital +10.3% (WAL grew ~10% organically that
+quarter) and SSB/CenterState -9.6%. Three RSSD traps worth recording: Sterling
+Bancorp NY is 3083291 (the former Provident New York Bancorp), not 3852031
+(a Michigan bank of the same name); IBERIABANK is 2291914, whose raw name
+column still reads ISB Financial in old rows; Heartland Financial USA is
+1206546, filed as Heartland Bancorp. Atlantic Capital stopped filing Y-9C in
+2018 (below threshold) so its 2022 line carries `liab=3446062` from its Q4
+2021 results 8-K. Macatawa (Wintrust 2024, 3.1%, also a lapsed filer) left out.
+
+### Verification
+
+Pre-init store copied to `.scratchpad/extend_next10/pre_init/`; compared after
+the final run (`verify_unchanged.py` there):
+
+- `pd_panel`, 37 pre-existing banks: 49,200 rows on both sides, zero one-sided
+  rows, zero np_PD / merton_PD / sE differences (max abs diff 2e-16), including
+  the Yahoo-era weeks that runs 3 and 4 recomputed from scratch.
+  `panel_revisions` read "history unchanged" on both runs.
+- `group_panel`: 4,749 rows, identical values and `n_members` throughout.
+- Dashboard mean recomputed under the export's rule: 2,087 weeks, identical
+  `n_banks` and mean on every one.
+- New series: nine regionals run to 2026-09-25 (UMB, First Horizon, Old
+  National, Popular and Valley from 1986-10-03, the rest from their listing),
+  Zions switches from `y9c` under 1027004 to `call_report` under 276579 at the
+  2018-10-05 week with E_scaled continuous across the seam, Webster ends
+  2026-01-02. 157 bridged weeks across the seven new acquirers (ONB 63, SSB 35,
+  VLY 30, UMBF 11, FHN 9, EWBC 9; WAL/Bridge Capital bridged none, CRSP
+  re-based after the next filing).
+- Rolling-era `checks` (430 days) clean for all 48 banks. The full-history
+  sweep at the end of init lists the new banks' 1986+ crisis-era flags
+  (se_steps 100, pd_plausibility 56, bs_jumps 64, issuance_bs_lag 1,402 bank
+  weeks); those await triage like the original 25 did, and `update` does not
+  re-scan them.
+- Export: 70,808 panel rows, 48 banks, 1.1 MB. The "All non-failed banks"
+  download now filters on `!dead` alone, so it includes the regionals.
+- Four `init` runs were needed (v2 rejected; `edge` unbound after the first
+  fix; window-only compute; full). Three of the four were pipeline defects
+  fixed above, not data problems.
+
 ## 2026-08-19 - 12 failed banks added as dead+nogroup
 
 Supervisor-flag backtest needed failed banks beyond SVB. Added Wachovia,
