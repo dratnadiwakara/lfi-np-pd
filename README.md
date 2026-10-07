@@ -3,7 +3,7 @@
 Minimal, accuracy-first weekly **Nagel–Purnanandam (2019) modified-Merton
 PD** + classic Merton PD for a small, explicitly listed set of large US
 financial institutions (`banks.txt`: 24 LFI bank holding companies + SVB, plus
-12 failed banks and the next 10 largest listed regionals as `nogroup`, plus
+12 failed banks and the next 20 largest listed regionals as `nogroup`, plus
 Webster, acquired in 2026, as `dead nogroup`).
 
 Replaces the LFI use-case of the `bank-pd` repo (1,450-bank cross-section),
@@ -350,7 +350,7 @@ Deploy steps are in [shiny/README.md](shiny/README.md).
 
 ## Widening the scope
 
-### Scope as of 2026-09-29
+### Scope as of 2026-10-07
 
 | tier | n | flags | in group indices / mean |
 |---|---|---|---|
@@ -358,6 +358,7 @@ Deploy steps are in [shiny/README.md](shiny/README.md).
 | SVB | 1 | `dead` | yes (leaves by running out of rows) |
 | failed banks (supervisor backtest) | 12 | `dead nogroup` | no |
 | next-10 regionals (WAL, ZION, EWBC, FHN, BPOP, WTFC, ONB, UMBF, SSB, VLY) | 10 | `nogroup` | no |
+| second next-10 (COLB, SOFI, CFR, BOKF, ASB, FNB, PB, AUB, HWC, CBSH), added 2026-10-07 | 10 | `nogroup` | no |
 | Webster (acquired by Santander 2026-08-20) | 1 | `dead nogroup` | no |
 
 The regionals are live (Yahoo-pulled) and carry `group=lender` as a label only.
@@ -370,8 +371,11 @@ early 2026 into a new RSSD 6073350 with no CRSP link row yet), Flagstar/NYCB
 (holding company stopped filing Y-9C at 2025-09-30; needs a link override to
 bank RSSD 694904), Comerica (acquired by Fifth Third 2026-02-01), Webster, which ranked 5th but was
 acquired by Banco Santander on 2026-08-20 and is kept `dead nogroup`, and the
-non-bank Y-9C filers (Ameriprise, Raymond James, Stifel, SoFi) and foreign
-intermediate holding companies, which have no listed US equity.
+non-bank Y-9C filers (Ameriprise, Raymond James, Stifel) and foreign
+intermediate holding companies, which have no listed US equity. SoFi was left
+out of the first ten as a non-bank and added in the second: it has been a bank
+holding company since 2022, so its series starts with its first Y-9C
+(2022-03-31). Banc of California, 11th in the second round, is out.
 
 
 Add RSSDs to `banks.txt` (each needs a `group=`; flag failed banks `dead` so

@@ -90,3 +90,57 @@
 1048773  3536386  close=2018-01-01   # VLY / USAmeriBancorp  -1.6%
 1048773  2692892  close=2019-12-01   # VLY / Oritani Financial  +1.8%
 1048773  1245620  close=2022-04-01   # VLY / Bank Leumi Le-Israel Corporation (US holding company of Bank Leumi USA; files Y-9C)  -5.1%
+# Second next-10 acquirers, added 2026-10-07. Same method as the first ten:
+# every share step >3% in CRSP with a liability step >4% in the next Y-9C was
+# traced to a deal, and the target taken from Y-9C or, where the target had
+# stopped filing (the 2018 threshold rise to $3bn), from its bank's Call Report.
+# Left out: capital raises (COLB 2009-10, FNB 2009, HWC 2009 and 2011-03, ASB
+# 2010 and 2024, SOFI 2024-25), HWC / Lamar Capital 2001 (cash plus convertible
+# preferred, no common issued), deals under 4% of the acquirer, and targets
+# with no source for liabilities (thrifts before 2012: ASB / First Financial
+# 1997 and First Federal Capital 2004, FNB / Slippery Rock 2004, AUB / First
+# Market Bank 2010). PB / Stellar Bancorp (2026-07-01) waits for PB's
+# 2026-09-30 Y-9C, which the backtest needs; until then its weeks stay
+# issuance_bs_lag flags. The two PB 2026 lines are tested one at a time against
+# a quarter that holds both, so each reads about -6.5%; together -0.2%.
+2078816  1029893  close=2013-04-01   # COLB / West Coast Bancorp (Oregon; RSSD 1029893, not the California filer of the same name)  +2.9%
+2078816  2634490  close=2014-11-01   # COLB / Intermountain Community Bancorp  -2.3%
+2078816  2762973  close=2017-11-01   # COLB / Pacific Continental  -0.2%
+2078816  0        close=2021-10-01 liab=1753965   # COLB / Bank of Commerce Holdings (holding company stopped filing Y-9C at 2018-06-30 when the threshold rose to $3bn. Total liabilities of its bank, Merchants Bank of Commerce, Call Report 2021-09-30)  -1.8%
+2078816  2747644  close=2023-03-01   # COLB / Umpqua Holdings (reverse merger: Umpqua was the accounting acquirer, Columbia the legal survivor whose RSSD and permco continue)  -3.4%
+2078816  3489594  close=2025-08-31   # COLB / Pacific Premier Bancorp  +2.8%
+1971693  2521406  close=2004-05-01   # AUB (then Union Bankshares) / Guaranty Financial (Charlottesville VA)  -6.3%
+1971693  2502049  close=2014-01-01   # AUB (then Union First Market) / StellarOne  +1.0%
+1971693  3012554  close=2018-01-01   # AUB / Xenith Bankshares (RSSD 3012554, the 2016 Hampton Roads Bankshares successor, not the pre-2016 Xenith 3729263)  -1.8%
+1971693  3109904  close=2019-02-01   # AUB / Access National  -0.1%
+1971693  1076691  close=2024-04-01   # AUB / American National Bankshares (Danville VA)  -0.7%
+1971693  1248304  close=2025-04-01   # AUB / Sandy Spring Bancorp  +3.7%
+3005332  1117736  close=2002-01-18   # FNB / Promistar Financial  -4.3%
+3005332  2123958  close=2005-02-18   # FNB / NSD Bancorp  +0.2%
+3005332  1117259  close=2008-04-01   # FNB / Omega Financial  -1.5%
+3005332  1118229  close=2011-01-01   # FNB / Comm Bancorp  -1.9%
+3005332  0        close=2012-01-01 liab=1669708   # FNB / Parkvale Financial (an SLHC with no Y-9C. Total liabilities of Parkvale Savings Bank, Call Report 2011-12-31)  -1.2%
+3005332  3828652  close=2013-10-12   # FNB / PVF Capital  +1.7%
+3005332  3832949  close=2014-02-15   # FNB / BCSB Bancorp  -2.0%
+3005332  2807614  close=2016-02-13   # FNB / Metro Bancorp (Harrisburg PA)  +1.6%
+3005332  3432965  close=2017-03-11   # FNB / Yadkin Financial  -1.4%
+3005332  0        close=2022-01-22 liab=2132893   # FNB / Howard Bancorp (stopped filing Y-9C at 2018-06-30. Total liabilities of Howard Bank, Call Report 2021-12-31)  -0.2%
+1086533  1079740  close=2011-06-04   # HWC (then Hancock Holding) / Whitney Holding  -0.9%
+1086533  0        close=2019-09-21 liab=1512112   # HWC / MidSouth Bancorp (stopped filing Y-9C at 2018-06-30. Total liabilities of MidSouth Bank NA, Call Report 2019-06-30)  +0.0%
+1883693  1060328  close=2018-10-01   # BOKF / CoBiz Financial  -1.5%
+1102367  1104080  close=2006-12-08   # CFR / Summit Bancshares (Fort Worth)  -2.1%
+1109599  1104400  close=2001-02-28   # PB / Commercial Bancshares (Houston)  -0.9%
+1109599  2496335  close=2002-09-01   # PB / Paradigm Bancorporation  -3.1%
+1109599  2345077  close=2006-04-01   # PB / SNB Bancshares (Sugar Land)  +4.0%
+1109599  2663838  close=2007-01-31   # PB / TexasUnited Bancshares  +6.0%
+1109599  1103177  close=2012-07-01   # PB / American State Financial  +2.3%
+1109599  1058594  close=2013-04-01   # PB / Coppermark Bancshares  +0.9%
+1109599  2697347  close=2013-11-01   # PB / FVNB Corp  +0.4%
+1109599  1055315  close=2014-04-01   # PB / F&M Bancorporation (Tulsa OK; RSSD 1055315, not the Wisconsin filer of the same name)  +1.4%
+1109599  4191465  close=2019-11-01   # PB / LegacyTexas Financial Group  +3.9%
+1109599  0        close=2026-01-02 liab=2294556   # PB / American Bank Holding Corporation (Corpus Christi; no Y-9C. Total liabilities of American Bank NA, RSSD 807955, Call Report 2025-12-31)  -6.4%
+1109599  0        close=2026-02-01 liab=2204133   # PB / Southwest Bancshares (San Antonio; no Y-9C. Total liabilities of Texas Partners Bank, Call Report 2025-12-31)  -6.6%
+1199563  1210413  close=2005-10-01   # ASB / State Financial Services (Hales Corners WI)  +2.4%
+1199563  2929374  close=2018-02-01   # ASB / Bank Mutual  -0.2%
+1199563  1059715  close=2026-04-01   # ASB / American National Corporation (Omaha)  -2.1%
+1049341  3547159  close=2026-01-01   # CBSH / FineMark Holdings  +4.0%

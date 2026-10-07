@@ -421,6 +421,108 @@ Live store, 2024+: 4 events - COF/Discover (1.67x), FITB 2026-02-04 (1.64x),
 HBAN 2026-02-03 (1.29x), FCNCA 2026-01-02 (1.12x), KEY 2025-01-31 (1.12x).
 All plausible corporate actions; none acked yet.
 
+## 2026-10-07 - second next-10 added as live nogroup
+
+Scope widened from 48 to 58 lines. The ten are the largest listed Y-9C filers
+below Valley National by 2026-06-30 assets, with SoFi (60.9bn) counted as a
+bank holding company this time: Columbia Banking (65.4bn), SoFi, Cullen/Frost,
+BOK Financial, Associated, F.N.B., Prosperity, Atlantic Union, Hancock Whitney
+and Commerce (35.3bn). Banc of California (35.0bn) would have been tenth
+without SoFi. Every unlinked filer in that size range is a foreign IHC or a
+private company (USAA, John Deere Capital, First National of Nebraska, Midland
+Financial, BCI, Arvest). All live, all `nogroup`, `group=lender` as a label.
+No pipeline code changed; the two init fixes from 2026-09-29 carried this
+round on the first run.
+
+All ten RSSDs map to one permco each, all have dsf_v2 through 2025-12-31, and
+none needed a ticker override. SoFi's series starts 2022-04-01, the first week
+after its first Y-9C.
+
+### Mergers
+
+41 lines added. Candidates came from the data rather than memory: every CRSP
+share step above 3% with a matching market-cap step (stock splits and stock
+dividends move shares and price in opposite directions, so the market-cap
+test drops them) and a liability step above 4% in the next Y-9C was traced to
+a deal, then the target RSSD checked by name and state. Script and output in
+`.scratchpad/extend_next10b/candidates.py`. Every line passes the 15% backtest
+before init; the worst are the two Prosperity 2026 lines at -6.4% and -6.6%,
+which are tested one at a time against a quarter that contains both (together
+-0.2%), and TexasUnited at +6.0%.
+
+- Four targets had stopped filing Y-9C before the close, mostly at 2018-06-30
+  when the threshold rose to $3bn: Bank of Commerce Holdings (COLB 2021),
+  Howard Bancorp (FNB 2022), MidSouth Bancorp (HWC 2019), plus Parkvale (FNB
+  2012), an SLHC with no Y-9C. Each carries `liab=` from its bank's Call Report
+  for the last quarter before the close.
+- The two Prosperity 2026 targets (American Bank Holding, closed 2026-01-02;
+  Southwest Bancshares, closed 2026-02-01) never filed Y-9C, so both use
+  `liab=` from their banks' 2025-12-31 Call Reports. Their Yahoo share steps
+  land 2026-01-04 and 2026-03-05, both inside the lookahead window.
+- Columbia/Umpqua (2023) and Banc/PacWest are reverse mergers. The Columbia
+  line goes to the legal survivor, whose RSSD and permco continue.
+- Four deals bridge no weeks because CRSP re-based the share count on the
+  quarter end the next filing already covers: Hancock/Whitney (2011-06-30),
+  Columbia/Intermountain (2014-12-31), F.N.B./Yadkin (2017-03-31) and
+  Columbia/Pacific Premier (2025-09-30). BOK/CoBiz behaves the same way. They
+  stay in the file as documentation, as HBAN/Veritex does.
+- Left out: capital raises (COLB 2009-10, FNB 2009, HWC 2009 and 2011-03, ASB
+  2010 and 2024, SoFi 2024-25); Hancock/Lamar Capital 2001, paid in cash and
+  convertible preferred with no common issued; deals under 4%; and targets
+  with no liabilities source (pre-2012 thrifts: Associated/First Financial
+  1997 and First Federal Capital 2004, Atlantic Union/First Market Bank 2010;
+  F.N.B./Slippery Rock 2004, whose close date could not be confirmed).
+- **Prosperity/Stellar Bancorp, closed 2026-07-01, is not in the file yet.**
+  Prosperity issued 19.4m shares (Yahoo step 2026-07-02, x1.19) and Stellar's
+  last Y-9C is 2026-06-30, so the bridge would be live today. The backtest
+  needs Prosperity's 2026-09-30 Y-9C, which has not landed. Until it does,
+  PB's E_scaled carries Stellar's equity against Prosperity-only liabilities
+  (0.212 on 2026-06-26, 0.239 on 2026-07-03), so PB's PD from 2026-07-03 reads
+  low and issuance_bs_lag flags those weeks. Add the line once the filing is
+  in; the stale-row recompute picks the weeks up on the next `update`.
+
+277 bridged weeks across the new acquirers: F.N.B. 74, Prosperity 64,
+Atlantic Union 55, Columbia 39, Associated 30, Commerce 12, Hancock Whitney 2,
+Cullen/Frost 1, BOK and SoFi 0.
+
+### Verification
+
+Pre-init store copied to `.scratchpad/extend_next10b/pre_init/` after the
+morning `update`; `verify_unchanged.py` there compares the two.
+
+- `pd_panel`, 48 pre-existing banks: 66,746 rows on both sides, zero one-sided
+  rows, and every input and output column (total_liab, market_cap_raw,
+  E_scaled, sE, r, L, B, mdef, fs, bookF, np_PD) equal to 1e-9, with one
+  exception below. `panel_revisions` read "history unchanged" and `pull_diff`
+  "no changes vs previous pull".
+- **merton_PD flipped between NULL and a value on 4 of 66,746 rows** with
+  identical inputs: FITB 2009-04-10 and C 2009-06-26 (NULL -> 0.9956, 0.9963),
+  UMBF 2006-10-20 and COF 2023-09-01 (0.0079, 0.2593 -> NULL). Init
+  recomputed every row, and `compute_merton_dtd` runs `merton_pd_from_paper`
+  (scipy `fsolve`, i.e. MINPACK) in a thread pool, turning any exception into
+  NaN. MINPACK is not thread-safe, so a solve can fail or succeed depending on
+  what runs beside it. Solved serially five times each, the new values are the
+  reproducible ones: FITB and C converge to the stored numbers, UMBF and COF
+  fail every time ("iteration is not making good progress"). The earlier
+  `verify_unchanged.py` compared with ABS(new - old), which is NULL when one
+  side is NULL, so it could not see this; the 2026-09-29 round may carry the
+  same kind of flip unnoticed. Not patched back. Fix belongs in the compute
+  kernel (serial or process-based Merton solves) and is not part of this
+  change.
+- `group_panel`: 4,753 rows, identical values and `n_members`. Group Merton
+  uses the same solver, so this held by luck of the draw as much as design.
+- Dashboard mean: 2,088 weeks, identical `n_banks` and np_PD mean on every
+  one. The merton_PD mean moves on the three group-bank weeks above (2009-04-10
+  +0.0058, 2009-06-26 +0.0064, 2023-09-01 -0.0009).
+- New series run to 2026-10-02: Commerce, Cullen/Frost and Associated from
+  1986-10-03, the rest from listing or first filing (F.N.B. 2001-07-06 when
+  its Y-9C starts, SoFi 2022-04-01).
+- New flag: `fallback_rate` on SoFi, 42% of its last 52 weeks off the value
+  surface. Its equity volatility is high for a bank and its NP PD (0.46 at
+  2026-10-02) should be read with that in mind. The full-history sweep adds
+  the new banks' crisis-era flags (se_steps 114, pd_plausibility 73, bs_jumps
+  85, issuance_bs_lag 1,499 bank weeks); `update` does not re-scan them.
+
 ## 2026-09-29 - next-10 regionals added as live nogroup
 
 Scope widened from 37 to 48 lines: the ten largest listed US banks below the

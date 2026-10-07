@@ -72,3 +72,17 @@
 1049828  nogroup group=lender  # UMB FINANCIAL CORP
 1133437  nogroup group=lender  # SOUTH STATE CORP
 1048773  nogroup group=lender  # VALLEY NATIONAL BANCORP
+# Second next-10 by 2026-06-30 Y-9C assets, added 2026-10-07: the ten largest
+# listed Y-9C filers below Valley National, with SoFi included as a bank
+# holding company (so Banc of California, 11th, is out). Same treatment as the
+# first ten: live, nogroup, group=lender as a label only.
+2078816  nogroup group=lender  # COLUMBIA BANKING SYSTEM INC
+5586871  nogroup group=lender  # SOFI TECHNOLOGIES INC (BHC since 2022; Y-9C from 2022-03-31)
+1102367  nogroup group=lender  # CULLEN/FROST BANKERS INC
+1883693  nogroup group=lender  # BOK FINANCIAL CORP
+1199563  nogroup group=lender  # ASSOCIATED BANC-CORP
+3005332  nogroup group=lender  # F N B CORP
+1109599  nogroup group=lender  # PROSPERITY BANCSHARES INC
+1971693  nogroup group=lender  # ATLANTIC UNION BANKSHARES CORP
+1086533  nogroup group=lender  # HANCOCK WHITNEY CORP
+1049341  nogroup group=lender  # COMMERCE BANCSHARES INC
