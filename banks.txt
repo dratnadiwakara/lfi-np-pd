@@ -86,3 +86,8 @@
 1971693  nogroup group=lender  # ATLANTIC UNION BANKSHARES CORP
 1086533  nogroup group=lender  # HANCOCK WHITNEY CORP
 1049341  nogroup group=lender  # COMMERCE BANCSHARES INC
+# Added 2026-10-07 with links.txt overrides. Both ranked above Western
+# Alliance by 2026-06-30 assets but were held back on 2026-09-29 because the
+# vendor link still points their permcos at RSSDs that stopped filing.
+6073350  nogroup group=lender  # PINNACLE FINANCIAL PARTNERS (new holding company from 2026-01-01; legacy Pinnacle RSSD 2925657 before; Synovus bridged in mergers.txt)
+694904   nogroup group=lender  # FLAGSTAR BANK NA (formerly New York Community Bancorp / Flagstar Financial, RSSD 2132932 until 2025-09-30; Call Report after)

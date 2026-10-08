@@ -144,3 +144,19 @@
 1199563  2929374  close=2018-02-01   # ASB / Bank Mutual  -0.2%
 1199563  1059715  close=2026-04-01   # ASB / American National Corporation (Omaha)  -2.1%
 1049341  3547159  close=2026-01-01   # CBSH / FineMark Holdings  +4.0%
+# Pinnacle and Flagstar, added 2026-10-07 with links.txt. Same method as
+# above. PNFP / Synovus is backtested against the new holding company's first
+# Y-9C (RSSD 6073350, 2026-03-31), found through links.txt. Left out: PNFP /
+# Magna Bank 2015 (shares re-based on the quarter end, so no weeks to bridge,
+# and it fails the 15% test alone because CapitalMark closed in the same
+# quarter), FLG / Haven Bancorp 2000 and PennFed 2007 (thrifts with no
+# liabilities source), and FLG's 2009 and 2024 capital raises.
+2925657  3072923  close=2006-03-15   # PNFP / Cavalry Bancorp (Murfreesboro TN)  -3.8%
+2925657  3445424  close=2007-11-30   # PNFP / Mid-America Bancshares (Nashville)  -7.6%
+2925657  0        close=2015-07-31 liab=948617   # PNFP / CapitalMark Bank & Trust (a bank with no holding company, so no Y-9C. Total liabilities from its Call Report 2015-06-30)  -10.7% (Magna Bank closed in the same quarter and is not bridged; both together -1.6%)
+2925657  3541483  close=2016-07-01   # PNFP / Avenue Financial Holdings  +1.0%
+2925657  3141650  close=2017-06-16   # PNFP / BNC Bancorp  -3.5%
+2925657  1078846  close=2026-01-01   # PNFP / Synovus Financial (both merged into a new holding company, RSSD 6073350; legacy Pinnacle holders 1:1, so PNFP's permco 43147 carries the series. See links.txt)  -2.0%
+2132932  0        close=2001-07-31 liab=3377086   # FLG (then NYCB) / Richmond County Financial (an SLHC, no Y-9C. Total liabilities of Richmond County Savings Bank, Call Report 2001-06-30)  -4.3%
+2132932  0        close=2003-10-31 liab=9804665   # FLG (then NYCB) / Roslyn Bancorp (an SLHC, no Y-9C. Total liabilities of Roslyn Savings Bank, Call Report 2003-09-30)  +4.8%
+2132932  3852022  close=2022-12-01   # FLG (then NYCB) / Flagstar Bancorp  -2.8%

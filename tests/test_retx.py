@@ -290,24 +290,25 @@ class TestSharesGrounding:
 class TestBanksFile:
     def test_load_banks(self):
         banks = config.load_banks()
-        assert len(banks) == 58
+        assert len(banks) == 60
         dead = {b.rssd for b in banks if b.dead}
         assert 1031449 in dead, "SVB must be dead"
         assert len(dead) == 14, "SVB, the 12 failed backtest banks, Webster (acquired 2026-08)"
         # nogroup = the 12 failed backtest banks (SVB stays in published
-        # group history) plus the 20 live regionals added 2026-09-29 and
+        # group history) plus the 22 live regionals added 2026-09-29 and
         # 2026-10-07, whose bank-level PDs must not rewrite group_panel or the
         # dashboard mean.
         nogroup = {b.rssd for b in banks if b.nogroup}
         assert dead - {1031449} <= nogroup
         live_nogroup = {b.rssd for b in banks if b.nogroup and not b.dead}
-        assert len(live_nogroup) == 20
+        assert len(live_nogroup) == 22
         assert live_nogroup == {2349815, 276579, 1048773, 2734233, 1094640,
                                 1129382, 2260406, 1098303, 1049828, 1133437,
                                 2078816, 5586871, 1102367, 1883693, 1199563,
-                                3005332, 1109599, 1971693, 1086533, 1049341}
+                                3005332, 1109599, 1971693, 1086533, 1049341,
+                                6073350, 694904}
         assert 1145476 in dead and 1145476 in nogroup   # Webster
-        assert len({b.rssd for b in banks}) == 58
+        assert len({b.rssd for b in banks}) == 60
         assert 1073757 in {b.rssd for b in banks}  # BAC
 
 

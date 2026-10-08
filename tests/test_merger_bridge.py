@@ -438,10 +438,33 @@ class TestMergersFileBacktest:
 
     TOLERANCE = 0.15
 
+    @staticmethod
+    def _successors() -> dict[int, int]:
+        """old RSSD -> new RSSD for every links.txt override: the RSSDs the
+        vendor link gave the permco before from=. Pinnacle/Synovus closed
+        into a new holding company, so the combined filing is under 6073350,
+        not the acquirer's own RSSD."""
+        out: dict[int, int] = {}
+        overrides = config.load_link_overrides()
+        if not overrides or not config.link_db_path().exists():
+            return out
+        lk = duckdb.connect(str(config.link_db_path()), read_only=True)
+        try:
+            for o in overrides:
+                for (r,) in lk.execute(
+                        "SELECT DISTINCT CAST(bhc_rssd AS INTEGER) FROM crsp_frb_link "
+                        "WHERE CAST(permco AS INTEGER) = ? AND quarter_end < ? "
+                        "AND bhc_rssd IS NOT NULL", [o.permco, o.from_quarter]).fetchall():
+                    out[int(r)] = o.rssd
+        finally:
+            lk.close()
+        return out
+
     def test_every_merger_reproduces_the_next_filing(self):
         mergers = config.load_mergers()
         if not mergers:
             pytest.skip("mergers.txt is empty")
+        successors = self._successors()
         y = duckdb.connect(str(config.y9c_db_path()), read_only=True)
         try:
             problems = []
@@ -451,11 +474,13 @@ class TestMergersFileBacktest:
                     "AND date <= ? AND total_liab IS NOT NULL "
                     "ORDER BY date DESC LIMIT 1",
                     [m.acquirer_rssd, m.close_date]).fetchone()
-                post = y.execute(
-                    "SELECT date, total_liab FROM bs_panel_y9c WHERE id_rssd = ? "
-                    "AND date > ? AND total_liab IS NOT NULL "
-                    "ORDER BY date ASC LIMIT 1",
-                    [m.acquirer_rssd, m.close_date]).fetchone()
+                post_sql = ("SELECT date, total_liab FROM bs_panel_y9c WHERE id_rssd = ? "
+                            "AND date > ? AND total_liab IS NOT NULL "
+                            "ORDER BY date ASC LIMIT 1")
+                post = y.execute(post_sql, [m.acquirer_rssd, m.close_date]).fetchone()
+                if post is None and m.acquirer_rssd in successors:
+                    post = y.execute(post_sql, [successors[m.acquirer_rssd],
+                                                m.close_date]).fetchone()
                 if pre is None or post is None:
                     problems.append(f"{m.acquirer_rssd} {m.close_date}: "
                                     "acquirer filings missing around the close")

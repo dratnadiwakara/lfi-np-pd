@@ -23,7 +23,7 @@ def _write(tmp_path, body):
 class TestParse:
     def test_every_real_bank_is_classified(self):
         banks = config.load_banks()
-        assert len(banks) == 58
+        assert len(banks) == 60
         assert all(b.group in config.BANK_GROUPS for b in banks), \
             "unclassified bank would vanish from group-wise cuts"
 

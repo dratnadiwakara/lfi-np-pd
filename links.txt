@@ -1,0 +1,22 @@
+# lfi-np-pd link overrides - permco -> RSSD from a quarter end onward.
+#
+# Why this file exists: the panel picks each week's balance-sheet filer from
+# the CRSP-FRB link table (ASOF on permco, quarter_end). When a listed
+# company's filer changes and the vendor link does not follow, the link keeps
+# an RSSD that no longer files. The Y-9C ASOF join then forward-fills the last
+# filing indefinitely, the Call Report fallback never triggers (the dead RSSD
+# files nothing there either), and only bs_stale notices. Each line replaces
+# the vendor's rows for that permco from from= onward.
+#
+# Format - one permco per line:
+#   <permco>  <rssd>  from=YYYY-MM-DD   # where the fact comes from
+#
+#   from=  first quarter end the new RSSD files for. Must be a quarter end.
+#
+# If the vendor later links the new RSSD to another permco, the scope build
+# sees one RSSD on two permcos and aborts; delete the line here then.
+#
+# Edit this file, then re-run:  lfinp init
+
+43147  6073350  from=2026-03-31   # PNFP: legacy Pinnacle (Y-9C 2925657, to 2025-12-31) and Synovus merged into a new holding company on 2026-01-01; legacy Pinnacle holders got shares 1:1, so permco 43147 (PNFP) carries on. The new holding company files Y-9C from 2026-03-31. Vendor link still maps 43147 to 2925657.
+12608  694904   from=2025-12-31   # FLG: Flagstar Financial (Y-9C 2132932, to 2025-09-30) merged into Flagstar Bank NA on 2025-10-17; the bank is the listed company and files Call Reports only. Same structure as Zions in 2018. Vendor link still maps 12608 to 2132932.

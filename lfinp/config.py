@@ -30,6 +30,7 @@ BANKS_PATH = Path(os.getenv("LFINP_BANKS_PATH", str(LFINP_ROOT / "banks.txt")))
 MERGERS_PATH = Path(
     os.getenv("LFINP_MERGERS_PATH", str(LFINP_ROOT / "mergers.txt"))
 )
+LINKS_PATH = Path(os.getenv("LFINP_LINKS_PATH", str(LFINP_ROOT / "links.txt")))
 
 # -- External data (sibling repo) ---------------------------------------------
 
@@ -392,6 +393,61 @@ def load_mergers(path: Optional[Path] = None) -> list[Merger]:
                               close_date=close, comment=comment.strip(),
                               liab_override=liab))
     return mergers
+
+
+@dataclass(frozen=True)
+class LinkOverride:
+    """permco -> rssd from a quarter end onward, replacing the vendor link.
+
+    For a listed company whose filer changed and the vendor link did not
+    follow: Flagstar's holding company merged into its bank (2025-10-17), and
+    Pinnacle and Synovus merged into a new holding company (2026-01-01). The
+    vendor link kept the old, non-filing RSSD, so the balance sheet would
+    forward-fill a dead filing with only a bs_stale flag."""
+    permco: int
+    rssd: int
+    from_quarter: date
+    comment: str
+
+
+def load_link_overrides(path: Optional[Path] = None) -> list[LinkOverride]:
+    """Parse links.txt: '<permco> <rssd> from=YYYY-MM-DD'. from= must be a
+    quarter end, since link rows are quarterly and the panel joins them ASOF.
+    Missing file means no overrides. Anything present must parse exactly."""
+    p = Path(path) if path else LINKS_PATH
+    if not p.exists():
+        return []
+    out: list[LinkOverride] = []
+    seen: set[int] = set()
+    for raw in p.read_text(encoding="utf-8").splitlines():
+        line, _, comment = raw.partition("#")
+        tokens = line.split()
+        if not tokens:
+            continue
+        if len(tokens) != 3:
+            raise ValueError(
+                f"Expected '<permco> <rssd> from=YYYY-MM-DD' on line: {raw!r}")
+        try:
+            permco, rssd = int(tokens[0]), int(tokens[1])
+        except ValueError as exc:
+            raise ValueError(f"Non-integer permco/RSSD on line: {raw!r}") from exc
+        key, sep, val = tokens[2].partition("=")
+        if not sep or key.lower() != "from":
+            raise ValueError(f"Expected from=YYYY-MM-DD on line: {raw!r}")
+        try:
+            frm = date.fromisoformat(val)
+        except ValueError as exc:
+            raise ValueError(f"Bad from date {val!r} on line: {raw!r}") from exc
+        if (frm.month, frm.day) not in {(3, 31), (6, 30), (9, 30), (12, 31)}:
+            raise ValueError(f"from= must be a quarter end on line: {raw!r}")
+        if permco <= 0 or rssd <= 0:
+            raise ValueError(f"permco and RSSD must be positive on line: {raw!r}")
+        if permco in seen:
+            raise ValueError(f"Duplicate override for permco {permco} in {p}")
+        seen.add(permco)
+        out.append(LinkOverride(permco=permco, rssd=rssd, from_quarter=frm,
+                                comment=comment.strip()))
+    return out
 
 
 # -- Secrets ---------------------------------------------------------------------------

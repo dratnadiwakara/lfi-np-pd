@@ -2,7 +2,7 @@
 
 Minimal, accuracy-first weekly NP (Nagel–Purnanandam 2019) + Merton PD for
 the banks in `banks.txt` (24 LFI BHCs + SVB + 12 `dead nogroup` failed banks +
-20 live `nogroup` regionals + Webster `dead nogroup`; `nogroup` keeps a bank out of group indices and
+22 live `nogroup` regionals + Webster `dead nogroup`; `nogroup` keeps a bank out of group indices and
 the dashboard mean). Full rationale and gate table
 in README.md; chronological decisions in NOTES.md. This repo replaces the
 LFI use-case of the sibling `bank-pd` repo, which stays untouched.
@@ -111,6 +111,12 @@ Edit `banks.txt` (one RSSD/line, `dead` flag = compute-only, no Yahoo),
 then re-run `lfinp init` — CRSP is watermarked, Yahoo pulls new live banks,
 compute fills missing rows. RSSD→permco resolution goes through the link
 table and refuses missing/ambiguous mappings.
+
+When the vendor link keeps a permco on an RSSD that stopped filing (holding
+company merged into its bank, or a merger into a new holding company), add a
+line to `links.txt` (`<permco> <rssd> from=<quarter end>`). It replaces the
+vendor rows from that quarter on; `tests/test_link_overrides.py` covers it.
+Current overrides: Pinnacle (43147 -> 6073350) and Flagstar (12608 -> 694904).
 
 ## Mergers
 

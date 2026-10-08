@@ -333,9 +333,44 @@ def refresh_link(conn: duckdb.DuckDBPyConnection) -> int:
             WHERE permco IS NOT NULL AND bhc_rssd IS NOT NULL
             """
         )
+        apply_link_overrides(conn, config.load_link_overrides())
         return int(conn.execute("SELECT COUNT(*) FROM link").fetchone()[0])
     finally:
         detach(conn, "ext_link")
+
+
+def _quarter_ends(start: date, end: date) -> list[date]:
+    out, y, q = [], start.year, (start.month - 1) // 3
+    while True:
+        m = 3 * q + 3
+        d = date(y, m, 31 if m in (3, 12) else 30)
+        if d > end:
+            return out
+        out.append(d)
+        q += 1
+        if q == 4:
+            y, q = y + 1, 0
+
+
+def apply_link_overrides(conn: duckdb.DuckDBPyConnection, overrides) -> int:
+    """Replace the vendor's rows for each overridden permco from its from=
+    quarter on, one confirmed row per quarter through the vendor's last
+    quarter. Replace, not add: the panel picks a week's RSSD by ASOF on
+    (permco, quarter_end), and two rows in one quarter would make that pick
+    arbitrary. If the vendor later links the new RSSD to some other permco,
+    permcos_for_rssds sees two permcos and aborts, which is the point."""
+    n = 0
+    last = conn.execute("SELECT MAX(quarter_end) FROM link").fetchone()[0]
+    for o in overrides:
+        conn.execute("DELETE FROM link WHERE permco = ? AND quarter_end >= ?",
+                      [o.permco, o.from_quarter])
+        qs = _quarter_ends(o.from_quarter, max(last or o.from_quarter, o.from_quarter))
+        conn.executemany(
+            "INSERT INTO link (permco, rssd, quarter_end, name, confirmed) "
+            "VALUES (?, ?, ?, ?, TRUE)",
+            [(o.permco, o.rssd, q, f"links.txt: {o.comment}"[:200]) for q in qs])
+        n += len(qs)
+    return n
 
 
 def permcos_for_rssds(

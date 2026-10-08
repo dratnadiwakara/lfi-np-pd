@@ -421,6 +421,79 @@ Live store, 2024+: 4 events - COF/Discover (1.67x), FITB 2026-02-04 (1.64x),
 HBAN 2026-02-03 (1.29x), FCNCA 2026-01-02 (1.12x), KEY 2025-01-31 (1.12x).
 All plausible corporate actions; none acked yet.
 
+## 2026-10-07 - Pinnacle and Flagstar added through links.txt
+
+Both were held back on 2026-09-29 because the vendor link points their
+permcos at RSSDs that no longer file. Scope goes from 58 to 60 lines, both
+live `nogroup`.
+
+- **Flagstar.** Flagstar Financial (RSSD 2132932) merged into Flagstar Bank NA
+  on 2025-10-17. The bank is now the listed company (FLG, same share count,
+  415m) and files Call Reports only (RSSD 694904). The holding company's last
+  Y-9C is 2025-09-30, but the vendor link maps permco 12608 to 2132932 through
+  2026-06-30. Same structure as Zions in 2018, where the vendor did switch.
+- **Pinnacle.** Legacy Pinnacle (2925657) and Synovus (1078846) both merged into
+  a new holding company on 2026-01-01, renamed Pinnacle Financial Partners
+  (RSSD 6073350, Y-9C from 2026-03-31). Legacy Pinnacle holders got shares 1:1
+  and Synovus holders 0.5237, so PNFP's price runs on from legacy Pinnacle
+  and permco 43147 carries the series. Yahoo shows the share count going from
+  77.6m to 150.3m in early January. The vendor link has no row for 6073350 and
+  keeps 43147 on 2925657.
+
+### links.txt
+
+New file, parsed by `config.load_link_overrides`, applied at the end of
+`sources.refresh_link`. Each line `<permco> <rssd> from=<quarter end>` deletes
+the vendor rows for that permco from that quarter on and inserts one confirmed
+row per quarter through the vendor's last quarter. It replaces rather than
+adds because the panel picks a week's RSSD by ASOF on (permco, quarter_end);
+two rows in one quarter would make that pick arbitrary. If the vendor later
+links the new RSSD to a different permco, `permcos_for_rssds` sees two permcos
+and aborts. `tests/test_link_overrides.py` pins parsing, the replace, the ASOF
+switch and that abort.
+
+The merger backtest needed one change: for PNFP/Synovus the acquirer's own
+RSSD never files again, so the post-close filing is looked up under the
+successor RSSD from links.txt. Every other line is tested as before.
+
+### Mergers
+
+Nine lines, found the same way as the second next-10. PNFP: Cavalry 2006,
+Mid-America 2007, CapitalMark 2015 (a bank with no holding company, `liab=`
+from its Call Report), Avenue 2016, BNC 2017, Synovus 2026 (-2.0%). FLG (then
+NYCB): Richmond County 2001 and Roslyn 2003 (SLHCs, `liab=` from their
+savings banks' Call Reports), Flagstar Bancorp 2022. Left out: PNFP / Magna
+2015 (fails the 15% test alone at -16.5% because CapitalMark closed in the same
+quarter, and its share re-base lands on the quarter end so it bridges no
+weeks), FLG / Haven 2000 and PennFed 2007 (thrifts with no liabilities source),
+and FLG's 2009 and 2024 capital raises. Bridged weeks: PNFP 41, FLG 16.
+
+The PNFP/Synovus bridge covers 2026-01-09 to 2026-03-27: liabilities 50.7bn
+reported plus 55.3bn Synovus = 106.0bn, against 108.2bn in the first combined
+filing. E_scaled runs 0.146 (2026-01-02, before the shares re-base on
+2026-01-06), 0.118 (2026-03-27, bridged) and 0.122 (2026-04-03, new filer).
+Without the bridge the Q1 weeks would have read about 0.28. Flagstar switches
+to the Call Report on the 2026-01-02 week; at 2025-09-30 the holding company
+and bank liabilities differ by 0.7% (83.56bn vs 82.98bn), so the seam is
+small.
+
+### Verification
+
+Pre-init store in `.scratchpad/extend_pnfp_flg/pre_init/`; the
+`verify_unchanged.py` there now counts a value turning NULL as a change.
+
+- 58 pre-existing banks: 87,879 rows on both sides, zero one-sided, zero
+  differences and zero NULL flips in total_liab, market_cap_raw, E_scaled, sE,
+  r, L, B, mdef, fs, bookF and np_PD. `group_panel` identical including
+  merton_PD and `n_members`; dashboard np_PD mean and `n_banks` identical.
+- merton_PD flipped NULL/value on 4 rows again: DORAL 2010-01-01, 2010-02-05,
+  2010-02-19 (dead nogroup) and C 2009-06-26, which converged in the run
+  before and failed in this one. That settles the thread-race explanation in
+  the entry below; it moves the dashboard Merton mean on 2009-06-26 back to
+  0.8819. Fix is in TODO.md.
+- Full-history check counts are unchanged except peer_divergence (758 -> 771);
+  no new issuance_bs_lag weeks, so both banks' deals are covered.
+
 ## 2026-10-07 - second next-10 added as live nogroup
 
 Scope widened from 48 to 58 lines. The ten are the largest listed Y-9C filers
