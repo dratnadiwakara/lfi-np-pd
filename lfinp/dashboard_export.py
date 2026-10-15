@@ -68,12 +68,17 @@ def _copy(conn: duckdb.DuckDBPyConnection, sql: str, path: Path) -> int:
     )
 
 
+# pd_panel keeps the rows of a bank dropped from banks.txt, and bank_group no
+# longer lists it, so both the panel and the mean must filter on bank_group.
+# Filtering only on nogroup let a dropped nogroup bank into the mean and
+# revised its published history.
 PANEL_SQL = """
 SELECT p.week_date, p.permco, p.np_PD, p.merton_PD,
        COALESCE(i.bs_bridged, FALSE) AS bs_bridged
 FROM pd_panel p
 LEFT JOIN pd_input i USING (permco, week_date)
-WHERE p.np_PD IS NOT NULL OR p.merton_PD IS NOT NULL
+WHERE (p.np_PD IS NOT NULL OR p.merton_PD IS NOT NULL)
+  AND p.permco IN (SELECT permco FROM bank_group WHERE permco IS NOT NULL)
 ORDER BY p.permco, p.week_date
 """
 
@@ -101,10 +106,11 @@ SELECT week_date,
        AVG(np_PD)     AS np_PD,
        AVG(merton_PD) AS merton_PD
 FROM pd_panel
-WHERE permco NOT IN (
-  SELECT permco FROM bank_group
-  WHERE COALESCE(nogroup, FALSE) AND permco IS NOT NULL
-)
+WHERE permco IN (SELECT permco FROM bank_group WHERE permco IS NOT NULL)
+  AND permco NOT IN (
+    SELECT permco FROM bank_group
+    WHERE COALESCE(nogroup, FALSE) AND permco IS NOT NULL
+  )
 GROUP BY week_date
 HAVING COUNT(np_PD) >= {min_banks}
 ORDER BY week_date

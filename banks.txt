@@ -77,12 +77,12 @@
 # holding company (so Banc of California, 11th, is out). Same treatment as the
 # first ten: live, nogroup, group=lender as a label only.
 2078816  nogroup group=lender  # COLUMBIA BANKING SYSTEM INC
-5586871  nogroup group=lender  # SOFI TECHNOLOGIES INC (BHC since 2022; Y-9C from 2022-03-31)
+# 5586871  nogroup group=lender  # SOFI TECHNOLOGIES INC (BHC since 2022; Y-9C from 2022-03-31)  [dropped 2026-10-15: pd_plausibility/pd_decoupling 2026-03-13, fallback_rate 40%]
 1102367  nogroup group=lender  # CULLEN/FROST BANKERS INC
 1883693  nogroup group=lender  # BOK FINANCIAL CORP
 1199563  nogroup group=lender  # ASSOCIATED BANC-CORP
 3005332  nogroup group=lender  # F N B CORP
-1109599  nogroup group=lender  # PROSPERITY BANCSHARES INC
+# 1109599  nogroup group=lender  # PROSPERITY BANCSHARES INC  [dropped 2026-10-15: issuance_bs_lag, 1.19x equity jump 2026-07-02 with no merger line]
 1971693  nogroup group=lender  # ATLANTIC UNION BANKSHARES CORP
 1086533  nogroup group=lender  # HANCOCK WHITNEY CORP
 1049341  nogroup group=lender  # COMMERCE BANCSHARES INC

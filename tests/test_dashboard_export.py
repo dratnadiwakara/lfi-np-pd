@@ -210,6 +210,43 @@ class TestMeanPD:
         assert row["np_PD"] == pytest.approx(0.15)
 
 
+class TestDroppedBank:
+    """A bank removed from banks.txt leaves bank_group but keeps its pd_panel
+    rows. Dropping a nogroup bank once put its whole history into the mean,
+    revising the published average back to 1999."""
+
+    @pytest.fixture()
+    def with_orphan(self, seeded):
+        for wk in [date(2026, 1, 2), date(2026, 1, 9), date(2026, 1, 16)]:
+            _panel(seeded, wk, 300, 3003, np_pd=0.90, merton=0.40)
+        return seeded
+
+    def test_orphan_stays_out_of_the_mean(self, with_orphan, tmp_path):
+        res = dx.export_dashboard(with_orphan, tmp_path, min_banks=1)
+        df = _rows(with_orphan, res.paths["mean_pd"])
+        row = df[df["week_date"].dt.date == date(2026, 1, 9)].iloc[0]
+        assert row["n_banks"] == 2
+        assert row["np_PD"] == pytest.approx((0.20 + 0.10) / 2)
+
+    def test_orphan_stays_out_of_the_panel(self, with_orphan, tmp_path):
+        res = dx.export_dashboard(with_orphan, tmp_path, min_banks=1)
+        df = _rows(with_orphan, res.paths["pd_panel"])
+        assert 300 not in set(df["permco"])
+        assert res.rows["pd_panel"] == 6
+
+    def test_listed_nogroup_bank_still_out_of_the_mean(self, seeded, tmp_path):
+        seeded.execute(
+            "INSERT INTO bank_group (rssd, grp, permco, dead, nogroup, name) "
+            "VALUES (3003, 'lender', 300, FALSE, TRUE, 'GAMMA REGIONAL')"
+        )
+        _panel(seeded, date(2026, 1, 9), 300, 3003, np_pd=0.90)
+        res = dx.export_dashboard(seeded, tmp_path, min_banks=1)
+        df = _rows(seeded, res.paths["mean_pd"])
+        row = df[df["week_date"].dt.date == date(2026, 1, 9)].iloc[0]
+        assert row["n_banks"] == 2
+        assert 300 in set(_rows(seeded, res.paths["pd_panel"])["permco"])
+
+
 class TestBridgedFlag:
     def test_bridged_week_is_true(self, seeded, tmp_path):
         _input(seeded, date(2026, 1, 9), 100, 1001, True)
