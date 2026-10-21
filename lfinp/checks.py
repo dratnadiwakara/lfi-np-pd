@@ -774,6 +774,23 @@ def check_panel_revisions(
         "(SELECT 1 FROM pd_panel n WHERE n.week_date = o.week_date "
         " AND n.permco = o.permco)"
     ).fetchone()[0]
+    if len(df):
+        # NULL before/after or a zero base has no relative size -> treat as large
+        rel = (df["np_delta"].abs() / df["np_PD_before"].abs()).where(
+            df["np_PD_before"].abs() > 0)
+        df["np_rel_delta"] = rel
+        small = rel.notna() & df["np_PD_after"].notna() & (
+            rel < config.PANEL_REVISION_WARN_REL)
+    if len(df) and small.all() and not dropped:
+        worst = df.loc[df["np_rel_delta"].idxmax()]
+        return CheckResult(
+            "panel_revisions", True,
+            f"WARN {len(df)} historical np_PD value(s) revised by "
+            f"<{config.PANEL_REVISION_WARN_REL:.1%} (worst {worst['np_rel_delta']:.2%}, "
+            f"{worst['np_delta']:+.4f}, rssd {int(worst['rssd'])} "
+            f"{worst['ref_date']:%Y-%m-%d}) - re-snapshot any cited figures",
+            df,
+        )
     if len(df) or dropped:
         worst = df["np_delta"].abs().max() if len(df) else 0.0
         return CheckResult(

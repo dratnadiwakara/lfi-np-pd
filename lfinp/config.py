@@ -107,6 +107,9 @@ DECOUPLE_SE_STABLE = 0.10
 BS_JUMP_THRESHOLD = float(os.getenv("LFINP_BS_JUMP", "0.30"))
 # 12: historical pd_panel values changing between runs
 PANEL_REVISION_TOL = 1e-6
+# revisions below this relative size (|delta| / |before|) pass with a warning;
+# any larger revision, a NULL <-> value change, or a dropped row still fails
+PANEL_REVISION_WARN_REL = float(os.getenv("LFINP_PANEL_REVISION_WARN_REL", "0.025"))
 # 14: equity base changed by issuance while the balance sheet is still the
 # pre-issuance quarter. Detected as market cap moving without a matching
 # return: (mcap_t / mcap_t-1) / (1 + retx_t), which is ~1.0 unless the share

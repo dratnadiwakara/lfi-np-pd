@@ -156,6 +156,46 @@ class TestPanelRevisions:
         assert not r.passed
         assert r.details.iloc[0]["np_delta"] == pytest.approx(0.35)
 
+    def test_small_revision_passes_with_warning(self, conn):
+        # CBSH 2026-05-01 on the 2026-10-20 run: 0.091711 -> 0.092504 (+0.86%)
+        conn.execute(
+            "INSERT INTO pd_panel (week_date, permco, rssd, sE, np_PD, merton_PD)"
+            " VALUES (DATE '2026-05-01', 100, 1049341, 0.216, 0.091711, 0.05)")
+        snapshot_panel(conn)
+        conn.execute("UPDATE pd_panel SET np_PD = 0.092504")
+        r = checks.check_panel_revisions(conn)
+        assert r.passed
+        assert r.summary.startswith("WARN 1 historical")
+        assert r.details.iloc[0]["np_rel_delta"] == pytest.approx(0.00865, abs=1e-4)
+
+    def test_one_large_revision_fails_whole_check(self, conn):
+        for wk, pd_ in [("2026-01-02", 0.20), ("2026-01-09", 0.20)]:
+            conn.execute(
+                "INSERT INTO pd_panel (week_date, permco, rssd, sE, np_PD, merton_PD)"
+                " VALUES (?, 100, 1000, 0.3, ?, 0.05)", [wk, pd_])
+        snapshot_panel(conn)
+        conn.execute("UPDATE pd_panel SET np_PD = 0.201 WHERE week_date = DATE '2026-01-02'")
+        conn.execute("UPDATE pd_panel SET np_PD = 0.21 WHERE week_date = DATE '2026-01-09'")
+        assert not checks.check_panel_revisions(conn).passed  # +5% on one week
+
+    def test_value_to_null_fails(self, conn):
+        conn.execute(
+            "INSERT INTO pd_panel (week_date, permco, rssd, sE, np_PD, merton_PD)"
+            " VALUES (DATE '2026-01-02', 100, 1000, 0.3, 0.20, 0.05)")
+        snapshot_panel(conn)
+        conn.execute("UPDATE pd_panel SET np_PD = NULL")
+        assert not checks.check_panel_revisions(conn).passed
+
+    def test_dropped_row_fails_even_if_rest_small(self, conn):
+        for permco in (100, 101):
+            conn.execute(
+                "INSERT INTO pd_panel (week_date, permco, rssd, sE, np_PD, merton_PD)"
+                " VALUES (DATE '2026-01-02', ?, 1000, 0.3, 0.20, 0.05)", [permco])
+        snapshot_panel(conn)
+        conn.execute("UPDATE pd_panel SET np_PD = 0.201 WHERE permco = 100")
+        conn.execute("DELETE FROM pd_panel WHERE permco = 101")
+        assert not checks.check_panel_revisions(conn).passed
+
     def test_clean_when_unchanged(self, conn):
         conn.execute(
             "INSERT INTO pd_panel (week_date, permco, rssd, sE, np_PD, merton_PD)"

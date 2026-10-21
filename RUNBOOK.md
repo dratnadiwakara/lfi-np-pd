@@ -117,7 +117,7 @@ on from — escalate. Nothing else in the pipeline will catch it a second time.
 | `bs_jumps` | liabilities moved >30% in a quarter | usually a merger, sometimes a bad filing |
 | `pd_decoupling` | the two PD measures stopped agreeing | not a data issue — the model, not the input |
 | `fallback_rate` | the model is extrapolating a lot | the bank is far outside normal ranges |
-| `panel_revisions` | past PDs changed since last run | expected after a vendor correction; check `pull_diff` for the cause |
+| `panel_revisions` | past PDs changed since last run (WARN only if every change is below 2.5%) | expected after a vendor correction; check `pull_diff` for the cause |
 | `issuance_bs_lag` | bank issued shares; its liabilities are still last quarter's | not a data problem. If it was an acquisition it can be corrected — see below |
 | `group_composition` | a sector index gained or lost a bank | not a data problem. See below |
 
