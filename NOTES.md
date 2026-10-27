@@ -421,6 +421,81 @@ Live store, 2024+: 4 events - COF/Discover (1.67x), FITB 2026-02-04 (1.64x),
 HBAN 2026-02-03 (1.29x), FCNCA 2026-01-02 (1.12x), KEY 2025-01-31 (1.12x).
 All plausible corporate actions; none acked yet.
 
+## 2026-10-27 - third next-10 added as live nogroup (nine banks)
+
+Scope goes from 58 to 67 lines. The candidates were the ten largest listed
+Y-9C filers below Commerce by 2026-06-30 assets, keeping only one-permco CRSP
+links: Banc of California (35.0bn), BankUnited, Fulton, Texas Capital, United
+Bankshares, Glacier, Eastern, Axos, United Community and Ameris (28.5bn).
+Ameriprise, Raymond James and Stifel rank higher but are wealth managers and
+broker-dealers, so they were not considered. All live, `nogroup`,
+`group=lender` as a label. No pipeline code changed.
+
+**Texas Capital is left out.** Legacy `crsp.dsf` carries a TCBI share count
+10.3% above `dsf_v2` on 12 interior days (2024-09-30 to 2024-10-15); returns
+agree. With TCBI in scope, `validate_v2_against_legacy` rejects v2 for every
+bank, so the new banks got no 2025 CRSP rows and two 2025 merger lines failed
+to resolve. The line is commented out in `banks.txt`. Re-adding TCBI needs a
+decision on that gate, not a data patch.
+
+### Mergers
+
+48 lines. Deals now come from the FFIEC NIC transformations table
+(`C:\empirical-data-construction\nic\nic.duckdb`): every predecessor RSSD
+merged into the acquirer holding company or one of its banks, with the legal
+date, excluding charter consolidations of banks the acquirer already owned.
+This replaces the share-step and liability-size matching of the earlier
+rounds and gives exact dates. Kept: targets of at least 4% of the acquirer's
+liabilities with a CRSP share step near the close. Targets that had stopped
+filing Y-9C use `liab=` from their bank's last Call Report (20 lines). All 48
+pass the 15% backtest; the worst are Glacier / Collegiate Peaks (-12.0%, two
+deals in 2018Q1) and Ameris / Hamilton State (-11.0%). Scripts and output in
+`.scratchpad/extend_next10c/` (`nic_deals.py`, `draft.py`, `backtest_new.py`).
+
+- NIC dates are often one day after the close (a Saturday for a Friday
+  close). That only matters on a quarter end: Ameris / Hamilton State is
+  recorded 2018-06-30, which the acquirer's own 2018-06-30 filing already
+  covers, so the line uses the CRSP step date 2018-06-29.
+- Left out, with the reason in `mergers.txt`: cash deals, two windows that
+  hold only a stock split, three lines that fail the 15% test (Ameris /
+  Atlantic Coast, Banc / Private Bank of California, Banc / PacWest), and
+  Fulton / Republic First 2024 (an FDIC sale funded by an offering).
+- **Eastern / HarborOne is not bridged.** NIC records the merger on
+  2025-11-01, but CRSP books the 17.9m new shares on 2025-09-30. The bridge
+  looks for the share step at most 10 days before the close, so no honest
+  line resolves. Because the step falls on the quarter-end date,
+  `issuance_bs_lag` does not flag it either. EBC's PD reads low from
+  2025-10-03 until the 2025-12-31 filing (liabilities 21.7bn against about
+  26.7bn combined).
+- Fulton / Blue Foundry (2026-04-01) uses Blue Foundry Bank's 2026-03-31 Call
+  Report; Yahoo shows the share step in early April (+6.9%).
+
+### init without the full recompute
+
+Stock `init` recomputes every bank from the earliest new CRSP day, which is
+1986 when a bank is added. That is how the 2026-10-07 rounds flipped Merton
+PDs on old rows (see TODO.md). This round ran `init` through
+`.scratchpad/extend_next10c/run_init.py`, which calls the same code with
+`recompute_since=None`. Old banks get no new CRSP rows, so the staleness set
+(weeks missing from `pd_panel` or with changed inputs) covers everything:
+11,396 new-bank rows and 0 group rows were computed.
+
+### Verification
+
+Pre-init store in `.scratchpad/extend_next10c/pre_init/`.
+
+- 58 pre-existing banks: 90,948 rows on both sides, zero one-sided, zero
+  NULL flips in any column including merton_PD. Three rows differ, all
+  Commerce (2026-04-24 to 2026-05-08): `init`'s Yahoo re-pull restated the
+  share count by +0.6% and np_PD moved by -0.0008. The morning `update` had
+  moved the same weeks by +0.0008, so Yahoo is alternating between two
+  values. This is the weekly re-pull, not the new banks.
+- `group_panel` identical (4,765 rows, values and `n_members`); dashboard
+  np_PD and merton_PD means and `n_banks` identical on all 2,091 weeks.
+- New series run to 2026-10-23: Fulton from 1986-10-03, United Bankshares
+  1987, Glacier 1992, Ameris 1994, United Community 2002, Banc, BankUnited
+  and Axos 2012-04-06 (Y-9C start), Eastern 2021-04-23. 307 bridged weeks.
+
 ## 2026-10-07 - Pinnacle and Flagstar added through links.txt
 
 Both were held back on 2026-09-29 because the vendor link points their

@@ -91,3 +91,18 @@
 # vendor link still points their permcos at RSSDs that stopped filing.
 6073350  nogroup group=lender  # PINNACLE FINANCIAL PARTNERS (new holding company from 2026-01-01; legacy Pinnacle RSSD 2925657 before; Synovus bridged in mergers.txt)
 694904   nogroup group=lender  # FLAGSTAR BANK NA (formerly New York Community Bancorp / Flagstar Financial, RSSD 2132932 until 2025-09-30; Call Report after)
+# Third next-10 by 2026-06-30 Y-9C assets, added 2026-10-27: the ten largest
+# listed lenders below Commerce, less Texas Capital (nine live) (SoFi and Prosperity stay out, see TODO.md).
+# Ameriprise, Raymond James and Stifel rank higher but are wealth managers and
+# broker-dealers, not lenders, so they are not in this set. Same treatment as
+# the first two rounds: live, nogroup, group=lender as a label only.
+3153130  nogroup group=lender  # BANC OF CALIFORNIA INC
+4028712  nogroup group=lender  # BANKUNITED INC
+1117129  nogroup group=lender  # FULTON FINANCIAL CORP
+# 2706735  nogroup group=lender  # TEXAS CAPITAL BANCSHARES INC  [left out 2026-10-27: legacy crsp.dsf carries a share count 10.3% above dsf_v2 on 12 days, 2024-09-30..2024-10-15, so the v2 validation in init rejects dsf_v2 for every bank]
+1076217  nogroup group=lender  # UNITED BANKSHARES INC
+2003975  nogroup group=lender  # GLACIER BANCORP INC
+1427239  nogroup group=lender  # EASTERN BANKSHARES INC
+3814310  nogroup group=lender  # AXOS FINANCIAL INC
+1249347  nogroup group=lender  # UNITED COMMUNITY BANKS INC
+1082067  nogroup group=lender  # AMERIS BANCORP

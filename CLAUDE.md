@@ -2,7 +2,7 @@
 
 Minimal, accuracy-first weekly NP (Nagel–Purnanandam 2019) + Merton PD for
 the banks in `banks.txt` (24 LFI BHCs + SVB + 12 `dead nogroup` failed banks +
-22 live `nogroup` regionals + Webster `dead nogroup`; `nogroup` keeps a bank out of group indices and
+29 live `nogroup` regionals + Webster `dead nogroup`; `nogroup` keeps a bank out of group indices and
 the dashboard mean). Full rationale and gate table
 in README.md; chronological decisions in NOTES.md. This repo replaces the
 LFI use-case of the sibling `bank-pd` repo, which stays untouched.
